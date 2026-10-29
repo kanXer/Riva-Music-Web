@@ -287,12 +287,18 @@ export function Player() {
 
   // ---- Swipe Up / Down to change song ----
   const handleSheetTouchStart = (e: React.TouchEvent<HTMLDivElement>) => {
-    if ((e.target as HTMLElement).closest('.disk-touch-area, input, button')) return;
+    // Never trigger song change gestures when touching inside lyrics card, disk scratch area, sliders or buttons
+    if ((e.target as HTMLElement).closest('.disk-touch-area, .lyric-scroll, .lyrics-card, input, button')) return;
     touchStartY.current = e.touches[0].clientY;
     touchStartX.current = e.touches[0].clientX;
   };
 
   const handleSheetTouchEnd = (e: React.TouchEvent<HTMLDivElement>) => {
+    if ((e.target as HTMLElement).closest('.disk-touch-area, .lyric-scroll, .lyrics-card, input, button')) {
+      touchStartY.current = null;
+      touchStartX.current = null;
+      return;
+    }
     if (touchStartY.current === null || touchStartX.current === null) return;
     const deltaY = e.changedTouches[0].clientY - touchStartY.current;
     const deltaX = e.changedTouches[0].clientX - touchStartX.current;
@@ -444,7 +450,12 @@ export function Player() {
 
   /* ---------- Synced lyrics card ---------- */
   const lyricsCard = (heightClass: string) => (
-    <div className={`w-full ${heightClass} rounded-3xl bg-white/[0.05] border border-white/[0.12] dark:bg-white/[0.05] p-4 flex flex-col overflow-hidden`}>
+    <div
+      className={`lyrics-card w-full ${heightClass} rounded-3xl bg-white/[0.05] border border-white/[0.12] dark:bg-white/[0.05] p-4 flex flex-col overflow-hidden`}
+      onTouchStart={(e) => e.stopPropagation()}
+      onTouchEnd={(e) => e.stopPropagation()}
+      onTouchMove={(e) => e.stopPropagation()}
+    >
       <div className="flex items-center justify-between pb-2 shrink-0">
         <button
           onClick={() => setActiveTab('disk')}
