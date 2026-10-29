@@ -5,6 +5,7 @@ import PwaRegister from "@/components/PwaRegister";
 import "./globals.css";
 
 export const metadata: Metadata = {
+  metadataBase: new URL(process.env.NEXT_PUBLIC_SITE_URL || 'https://riva-music-web.vercel.app'),
   title: "Riva Music — Stream Without Limits",
   description: "A sleek, ultra-fast music streaming web app with synchronized real-time lyrics, offline downloads, personalized mixes, and high-fidelity audio.",
   applicationName: "Riva Music",

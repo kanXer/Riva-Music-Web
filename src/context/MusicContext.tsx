@@ -508,13 +508,15 @@ export function MusicProvider({ children }: { children: React.ReactNode }) {
         if (!isSubscribed) return;
 
         if (data.url && audioRef.current) {
+          // Direct browser audio proxy pipe
           const proxyUrl = `/api/audio-proxy?url=${encodeURIComponent(data.url)}&ua=${encodeURIComponent(data.userAgent || '')}`;
-          audioRef.current.src = proxyUrl;
+          const audio = audioRef.current;
+          audio.src = proxyUrl;
           try {
-            await audioRef.current.play();
+            await audio.play();
             setIsPlaying(true);
           } catch (playErr) {
-            console.warn('Autoplay / play request prevented:', playErr);
+            console.warn('Playback error on audio-proxy:', playErr);
           }
         }
       } catch (err) {

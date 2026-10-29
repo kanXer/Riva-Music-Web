@@ -122,6 +122,9 @@ async function tryPlayer(videoId: string, clientSpec: typeof PLAYBACK_CLIENTS[nu
   return resp.json();
 }
 
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
+
 export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ videoId: string }> }

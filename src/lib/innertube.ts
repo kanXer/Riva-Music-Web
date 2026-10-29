@@ -57,7 +57,10 @@ export async function getVisitorData(force = false): Promise<string | null> {
       }
     });
     const html = await res.text();
-    const match = html.match(/"INNERTUBE_CONTEXT_VISITOR_DATA":"([^"]+)"/) || html.match(/"visitorData":"([^"]+)"/);
+    const match =
+      html.match(/"VISITOR_DATA":"([^"]+)"/) ||
+      html.match(/"visitorData":"([^"]+)"/) ||
+      html.match(/"INNERTUBE_CONTEXT_VISITOR_DATA":"([^"]+)"/);
     if (match && match[1]) {
       cachedVisitorData = match[1];
       visitorDataPrimedAt = now;

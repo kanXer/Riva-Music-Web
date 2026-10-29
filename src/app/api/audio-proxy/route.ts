@@ -2,6 +2,9 @@
 import { NextRequest } from 'next/server';
 import { VISIONOS_UA } from '@/lib/innertube';
 
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
+
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const streamUrl = searchParams.get('url');
@@ -32,7 +35,10 @@ export async function GET(req: NextRequest) {
       const val = audioRes.headers.get(h);
       if (val) responseHeaders.set(h, val);
     });
-    responseHeaders.set('Cache-Control', 'public, max-age=1800');
+
+    responseHeaders.set('Accept-Ranges', 'bytes');
+    responseHeaders.set('Access-Control-Allow-Origin', '*');
+    responseHeaders.set('Cache-Control', 'no-cache, no-store, must-revalidate');
 
     return new Response(audioRes.body, {
       status: audioRes.status,
