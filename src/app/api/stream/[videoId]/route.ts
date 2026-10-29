@@ -138,12 +138,20 @@ export async function GET(
     let vd = await getVisitorData();
     let lastData: any = null;
     const botMessages: string[] = [];
+    const clientAttempts: Array<{ name: string; status?: string; reason?: string; formatsCount?: number }> = [];
 
     // Pass 1: full client chain in priority order
     for (const clientSpec of PLAYBACK_CLIENTS) {
       try {
         const data = await tryPlayer(videoId, clientSpec, vd);
         lastData = data;
+        const fmts = (data?.streamingData?.adaptiveFormats || []).concat(data?.streamingData?.formats || []).filter((f: any) => f.url);
+        clientAttempts.push({
+          name: clientSpec.name,
+          status: data?.playabilityStatus?.status,
+          reason: data?.playabilityStatus?.reason,
+          formatsCount: fmts.length
+        });
 
         if (data?.playabilityStatus?.status === "OK") {
           const resolved = selectStream(data, clientSpec.userAgent);
@@ -151,29 +159,30 @@ export async function GET(
         }
         const reason = data?.playabilityStatus?.reason || "";
         botMessages.push(reason);
-        if (isBotBlocked([reason])) break; // refresh session and retry pass
       } catch (e: any) {
         botMessages.push(e?.message || "network error");
+        clientAttempts.push({ name: clientSpec.name, reason: e?.message });
       }
     }
 
-    // Pass 2 (bot-blocked or all failed): refresh session, one more full pass
-    vd = await getVisitorData(true);
-    for (const clientSpec of PLAYBACK_CLIENTS) {
-      try {
-        const data = await tryPlayer(videoId, clientSpec, vd);
-        lastData = data;
-        if (data?.playabilityStatus?.status === "OK") {
-          const resolved = selectStream(data, clientSpec.userAgent);
-          if (resolved) return NextResponse.json(resolved);
-        }
-      } catch (_) {}
+    // Pass 2: only if all failed and we saw bot block
+    if (isBotBlocked(botMessages)) {
+      vd = await getVisitorData(true);
+      for (const clientSpec of PLAYBACK_CLIENTS) {
+        try {
+          const data = await tryPlayer(videoId, clientSpec, vd);
+          lastData = data;
+          if (data?.playabilityStatus?.status === "OK") {
+            const resolved = selectStream(data, clientSpec.userAgent);
+            if (resolved) return NextResponse.json(resolved);
+          }
+        } catch (_) {}
+      }
     }
 
     return NextResponse.json({
       error: "Stream resolution failed on all clients",
-      commit: "dcef206",
-      attempted: PLAYBACK_CLIENTS.map(c => c.name),
+      attempts: clientAttempts,
       playability: lastData?.playabilityStatus?.status,
       reason: lastData?.playabilityStatus?.reason
     }, { status: 404 });
