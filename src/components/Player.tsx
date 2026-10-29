@@ -182,12 +182,25 @@ export function Player() {
     : -1;
 
   const lyricRefs = useRef<(HTMLParagraphElement | null)[]>([]);
+  const lyricsContainerRef = useRef<HTMLDivElement | null>(null);
 
-  // Auto-scroll: keep the active line vertically centered
+  // Auto-scroll: keep the active line vertically centered on the Y-axis
   useEffect(() => {
     if (activeTab !== 'lyrics') return;
-    if (activeLyricIndex >= 0 && lyricRefs.current[activeLyricIndex]) {
-      lyricRefs.current[activeLyricIndex]?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    if (activeLyricIndex >= 0) {
+      const activeEl = lyricRefs.current[activeLyricIndex];
+      const containerEl = lyricsContainerRef.current;
+      if (activeEl && containerEl) {
+        // Calculate offset so the active element is exactly centered vertically inside the container
+        const targetScrollTop =
+          activeEl.offsetTop - (containerEl.clientHeight / 2) + (activeEl.clientHeight / 2);
+        containerEl.scrollTo({
+          top: Math.max(0, targetScrollTop),
+          behavior: 'smooth'
+        });
+      } else if (activeEl) {
+        activeEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
     }
   }, [activeLyricIndex, activeTab]);
 
@@ -455,7 +468,16 @@ export function Player() {
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto flex flex-col gap-0.5 text-center py-2 lyric-scroll">
+      <div
+        ref={lyricsContainerRef}
+        className="flex-1 overflow-y-auto flex flex-col gap-1.5 text-center py-20 lyric-scroll scroll-smooth"
+        style={{
+          scrollPaddingTop: '50%',
+          scrollPaddingBottom: '50%',
+          maskImage: 'linear-gradient(to bottom, transparent 0%, black 18%, black 82%, transparent 100%)',
+          WebkitMaskImage: 'linear-gradient(to bottom, transparent 0%, black 18%, black 82%, transparent 100%)',
+        }}
+      >
         {isLoadingLyrics ? (
           <div className="flex-1 flex flex-col items-center justify-center gap-3 text-xs text-[var(--color-text-faint)]">
             <div className="w-7 h-7 border-2 border-[var(--color-lime)] border-t-transparent rounded-full animate-spin" />
@@ -478,12 +500,12 @@ export function Player() {
                 key={idx}
                 ref={el => { lyricRefs.current[idx] = el; }}
                 onClick={() => seek(Math.max(0, (line.startMs - lyricOffsetMs) / 1000))}
-                className={`py-1 px-2 rounded-xl cursor-pointer transition-all duration-200 text-sm sm:text-base leading-snug ${
+                className={`py-2 px-3 rounded-2xl cursor-pointer transition-all duration-300 leading-relaxed ${
                   isActive
-                    ? 'bg-[var(--color-lime)]/15 border border-[var(--color-lime)]/45 text-[var(--color-lime)] font-extrabold scale-[1.04]'
+                    ? 'text-lg sm:text-xl md:text-2xl font-black text-[var(--color-lime)] scale-[1.06] bg-[var(--color-lime)]/15 border border-[var(--color-lime)]/40 shadow-lg shadow-[var(--color-lime)]/10 my-1'
                     : isPast
-                      ? 'text-[var(--color-text-faint)] opacity-50'
-                      : 'text-[var(--color-text-secondary)] opacity-80'
+                      ? 'text-sm sm:text-base font-semibold text-[var(--color-text-faint)] opacity-40 hover:opacity-75'
+                      : 'text-sm sm:text-base font-semibold text-[var(--color-text-secondary)] opacity-70 hover:opacity-100'
                 }`}
               >
                 {line.text}
