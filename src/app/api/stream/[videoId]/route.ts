@@ -111,6 +111,12 @@ async function tryPlayer(videoId: string, clientSpec: typeof PLAYBACK_CLIENTS[nu
   };
   if (clientSpec.needsVisitorData && vd) headers["X-Goog-Visitor-Id"] = vd;
 
+  // Support YOUTUBE_COOKIE environment variable (for cloud/Vercel datacenter IPs)
+  const cookie = process.env.YOUTUBE_COOKIE;
+  if (cookie) {
+    headers["Cookie"] = cookie;
+  }
+
   const resp = await fetch(clientSpec.url, {
     method: "POST",
     headers,

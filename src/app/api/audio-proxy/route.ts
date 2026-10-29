@@ -23,6 +23,10 @@ export async function GET(req: NextRequest) {
     if (rangeHeader) {
       headers["Range"] = rangeHeader;
     }
+    const cookie = process.env.YOUTUBE_COOKIE;
+    if (cookie) {
+      headers["Cookie"] = cookie;
+    }
 
     const audioRes = await fetch(streamUrl, { headers });
     if (!audioRes.ok && audioRes.status !== 206) {
