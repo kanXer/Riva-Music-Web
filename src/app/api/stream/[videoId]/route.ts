@@ -101,7 +101,8 @@ async function tryPlayer(
   videoId: string,
   clientSpec: typeof PLAYBACK_CLIENTS[number],
   vd: string | null,
-  cookieHeader: string | null
+  cookieHeader: string | null,
+  timeoutMs = 5000
 ) {
   const context: any = { client: { ...clientSpec.client } };
   if (clientSpec.needsVisitorData && vd) context.client.visitorData = vd;
@@ -129,13 +130,17 @@ async function tryPlayer(
       videoId,
       contentCheckOk: true,
       racyCheckOk: true
-    })
+    }),
+    signal: AbortSignal.timeout(timeoutMs)
   });
   return resp.json();
 }
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
+
+// In-memory stream cache to avoid re-resolving repeatedly
+const streamCache = new Map<string, { data: any; expiry: number }>();
 
 export async function GET(
   req: NextRequest,
@@ -144,76 +149,110 @@ export async function GET(
   const { videoId } = await params;
   if (!videoId) return NextResponse.json({ error: "Missing videoId" }, { status: 400 });
 
-  try {
-    let session = await getYouTubeSession(videoId);
-    let lastData: any = null;
-    const botMessages: string[] = [];
-    const clientAttempts: Array<{ name: string; status?: string; reason?: string; formatsCount?: number }> = [];
-
-    // Pass 1: full client chain in priority order
-    for (const clientSpec of PLAYBACK_CLIENTS) {
-      try {
-        const data = await tryPlayer(videoId, clientSpec, session.visitorData, session.cookieHeader);
-        lastData = data;
-        const fmts = (data?.streamingData?.adaptiveFormats || []).concat(data?.streamingData?.formats || []).filter((f: any) => f.url);
-        clientAttempts.push({
-          name: clientSpec.name,
-          status: data?.playabilityStatus?.status,
-          reason: data?.playabilityStatus?.reason,
-          formatsCount: fmts.length
-        });
-
-        if (data?.playabilityStatus?.status === "OK") {
-          const resolved = selectStream(data, clientSpec.userAgent);
-          if (resolved) return NextResponse.json(resolved);
-        }
-        const reason = data?.playabilityStatus?.reason || "";
-        botMessages.push(reason);
-      } catch (e: any) {
-        botMessages.push(e?.message || "network error");
-        clientAttempts.push({ name: clientSpec.name, reason: e?.message });
+  // 1. Check in-memory cache
+  const cached = streamCache.get(videoId);
+  if (cached && Date.now() < cached.expiry) {
+    return NextResponse.json(cached.data, {
+      headers: {
+        'Cache-Control': 'public, max-age=3600, s-maxage=3600, stale-while-revalidate=86400',
       }
-    }
+    });
+  }
 
-    // Pass 2: only if all failed and we saw bot block -> refresh session for this video
-    if (isBotBlocked(botMessages)) {
-      session = await getYouTubeSession(videoId, true);
-      for (const clientSpec of PLAYBACK_CLIENTS) {
+  const { searchParams } = new URL(req.url);
+  const qTitle = searchParams.get('title') || '';
+  const qArtist = searchParams.get('artist') || '';
+  const initialQuery = `${qTitle} ${qArtist}`.trim();
+
+  try {
+    // 2. Race: Direct Clean Music Resolver vs Parallel Fast YouTube Clients
+    const directPromise = resolveDirectAudio(videoId, initialQuery);
+
+    const ytPromise = (async () => {
+      let session;
+      try {
+        session = await getYouTubeSession(videoId);
+      } catch (_) {
+        return null;
+      }
+
+      // Query top playback clients in parallel with a tight 2s timeout
+      const attempts = PLAYBACK_CLIENTS.map(async (clientSpec) => {
         try {
-          const data = await tryPlayer(videoId, clientSpec, session.visitorData, session.cookieHeader);
-          lastData = data;
+          const data = await tryPlayer(videoId, clientSpec, session.visitorData, session.cookieHeader, 2000);
           if (data?.playabilityStatus?.status === "OK") {
             const resolved = selectStream(data, clientSpec.userAgent);
-            if (resolved) return NextResponse.json(resolved);
+            if (resolved) return resolved;
           }
         } catch (_) {}
-      }
-    }
+        return null;
+      });
 
-    // Pass 3: Fallback via High-Quality Direct Music Pipeline (guaranteed clean stream on Vercel)
+      const results = await Promise.allSettled(attempts);
+      for (const r of results) {
+        if (r.status === 'fulfilled' && r.value) return r.value;
+      }
+      return null;
+    })();
+
+    // Run both in parallel; if direct or yt finishes first with a valid stream, use it
+    let streamResult: any = null;
+
     try {
-      const fallbackAudio = await resolveDirectAudio(videoId);
-      if (fallbackAudio?.url) {
-        return NextResponse.json({
-          url: fallbackAudio.url,
+      const firstValid = await Promise.any([
+        directPromise.then(res => {
+          if (!res?.url) throw new Error("No direct stream");
+          return {
+            url: res.url,
+            mimeType: "audio/mp4",
+            itag: 140,
+            bitrate: 320000,
+            durationMs: (parseInt(res.duration || "0", 10) || 180) * 1000,
+            title: res.title,
+            author: res.artist,
+            userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+          };
+        }),
+        ytPromise.then(res => {
+          if (!res) throw new Error("No YT stream");
+          return res;
+        })
+      ]);
+      streamResult = firstValid;
+    } catch (_) {
+      // If Promise.any rejected (both threw fast), wait for direct promise fallback
+      const fallback = await directPromise;
+      if (fallback?.url) {
+        streamResult = {
+          url: fallback.url,
           mimeType: "audio/mp4",
           itag: 140,
           bitrate: 320000,
-          durationMs: (parseInt(fallbackAudio.duration || "0", 10) || 180) * 1000,
-          title: fallbackAudio.title,
-          author: fallbackAudio.artist,
+          durationMs: (parseInt(fallback.duration || "0", 10) || 180) * 1000,
+          title: fallback.title,
+          author: fallback.artist,
           userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-        });
+        };
       }
-    } catch (e: any) {
-      console.warn("Direct audio fallback failed:", e?.message);
+    }
+
+    if (streamResult) {
+      // Cache stream for 2 hours
+      streamCache.set(videoId, {
+        data: streamResult,
+        expiry: Date.now() + 2 * 60 * 60 * 1000
+      });
+
+      return NextResponse.json(streamResult, {
+        headers: {
+          'Cache-Control': 'public, max-age=3600, s-maxage=3600, stale-while-revalidate=86400',
+        }
+      });
     }
 
     return NextResponse.json({
       error: "Stream resolution failed on all clients",
-      attempts: clientAttempts,
-      playability: lastData?.playabilityStatus?.status,
-      reason: lastData?.playabilityStatus?.reason
+      playability: "NOT_FOUND"
     }, { status: 404 });
   } catch (err: any) {
     console.error("Stream resolution error:", err);
@@ -222,24 +261,27 @@ export async function GET(
 }
 
 // Direct clean audio resolver for guaranteed stream delivery on datacenter/cloud IPs
-async function resolveDirectAudio(videoId: string) {
-  let query = "";
-  try {
-    const oembedRes = await fetch(`https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${videoId}&format=json`, {
-      signal: AbortSignal.timeout(3000)
-    });
-    if (oembedRes.ok) {
-      const oembedData = await oembedRes.json();
-      query = (oembedData.title || "").replace(/\[.*?\]|\(.*?\)/g, "").trim();
-    }
-  } catch (_) {}
+async function resolveDirectAudio(videoId: string, fallbackTitle?: string) {
+  let query = fallbackTitle || "";
+
+  if (!query) {
+    try {
+      const oembedRes = await fetch(`https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${videoId}&format=json`, {
+        signal: AbortSignal.timeout(2500)
+      });
+      if (oembedRes.ok) {
+        const oembedData = await oembedRes.json();
+        query = (oembedData.title || "").replace(/\[.*?\]|\(.*?\)/g, "").trim();
+      }
+    } catch (_) {}
+  }
 
   if (!query) query = videoId;
 
   const searchUrl = `https://www.jiosaavn.com/api.php?__call=autocomplete.get&_marker=0&query=${encodeURIComponent(query)}&ctx=web6dot0&_format=json`;
   const res = await fetch(searchUrl, {
     headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" },
-    signal: AbortSignal.timeout(4000)
+    signal: AbortSignal.timeout(3500)
   });
   if (!res.ok) return null;
 
@@ -250,7 +292,7 @@ async function resolveDirectAudio(videoId: string) {
   const songUrl = `https://www.jiosaavn.com/api.php?__call=song.getDetails&pids=${song.id}&_marker=0&ctx=web6dot0&_format=json`;
   const sRes = await fetch(songUrl, {
     headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" },
-    signal: AbortSignal.timeout(4000)
+    signal: AbortSignal.timeout(3500)
   });
   if (!sRes.ok) return null;
 

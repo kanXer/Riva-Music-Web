@@ -404,13 +404,19 @@ export function MusicProvider({ children }: { children: React.ReactNode }) {
     if ('mediaSession' in navigator) {
       try {
         navigator.mediaSession.setActionHandler('play', () => {
-          if (audioRef.current) {
+          if (isUsingYtRef.current && ytPlayerRef.current?.playVideo) {
+            ytPlayerRef.current.playVideo();
+            setIsPlaying(true);
+          } else if (audioRef.current) {
             audioRef.current.play();
             setIsPlaying(true);
           }
         });
         navigator.mediaSession.setActionHandler('pause', () => {
-          if (audioRef.current) {
+          if (isUsingYtRef.current && ytPlayerRef.current?.pauseVideo) {
+            ytPlayerRef.current.pauseVideo();
+            setIsPlaying(false);
+          } else if (audioRef.current) {
             audioRef.current.pause();
             setIsPlaying(false);
           }
@@ -418,23 +424,40 @@ export function MusicProvider({ children }: { children: React.ReactNode }) {
         navigator.mediaSession.setActionHandler('previoustrack', () => handlePreviousTrack());
         navigator.mediaSession.setActionHandler('nexttrack', () => handleNextTrack());
         navigator.mediaSession.setActionHandler('seekto', (details) => {
-          if (details.seekTime !== undefined && audioRef.current) {
-            audioRef.current.currentTime = details.seekTime;
-            setCurrentTime(details.seekTime);
+          if (details.seekTime !== undefined) {
+            if (isUsingYtRef.current && ytPlayerRef.current?.seekTo) {
+              ytPlayerRef.current.seekTo(details.seekTime, true);
+              setCurrentTime(details.seekTime);
+            } else if (audioRef.current) {
+              audioRef.current.currentTime = details.seekTime;
+              setCurrentTime(details.seekTime);
+            }
           }
         });
         navigator.mediaSession.setActionHandler('seekbackward', (details) => {
-          if (audioRef.current) {
-            audioRef.current.currentTime = Math.max(audioRef.current.currentTime - (details.seekOffset || 10), 0);
+          const offset = details.seekOffset || 10;
+          if (isUsingYtRef.current && ytPlayerRef.current?.getCurrentTime && ytPlayerRef.current?.seekTo) {
+            const current = ytPlayerRef.current.getCurrentTime() || 0;
+            ytPlayerRef.current.seekTo(Math.max(current - offset, 0), true);
+          } else if (audioRef.current) {
+            audioRef.current.currentTime = Math.max(audioRef.current.currentTime - offset, 0);
           }
         });
         navigator.mediaSession.setActionHandler('seekforward', (details) => {
-          if (audioRef.current) {
-            audioRef.current.currentTime = Math.min(audioRef.current.currentTime + (details.seekOffset || 10), audioRef.current.duration || 0);
+          const offset = details.seekOffset || 10;
+          if (isUsingYtRef.current && ytPlayerRef.current?.getCurrentTime && ytPlayerRef.current?.seekTo) {
+            const current = ytPlayerRef.current.getCurrentTime() || 0;
+            const dur = ytPlayerRef.current.getDuration ? ytPlayerRef.current.getDuration() : 0;
+            ytPlayerRef.current.seekTo(Math.min(current + offset, dur), true);
+          } else if (audioRef.current) {
+            audioRef.current.currentTime = Math.min(audioRef.current.currentTime + offset, audioRef.current.duration || 0);
           }
         });
         navigator.mediaSession.setActionHandler('stop', () => {
-          if (audioRef.current) {
+          if (isUsingYtRef.current && ytPlayerRef.current?.pauseVideo) {
+            ytPlayerRef.current.pauseVideo();
+            setIsPlaying(false);
+          } else if (audioRef.current) {
             audioRef.current.pause();
             audioRef.current.currentTime = 0;
             setIsPlaying(false);
@@ -493,9 +516,12 @@ export function MusicProvider({ children }: { children: React.ReactNode }) {
     // Helper: start YT IFrame playback fallback
     const startYtFallback = (vid: string) => {
       isUsingYtRef.current = true;
+      // In YT fallback mode on mobile browsers, keep HTML5 audio playing a silent audio track
+      // so Chrome/Safari does not throttle or kill background audio when the user locks screen!
       if (audioRef.current) {
-        audioRef.current.pause();
-        audioRef.current.src = '';
+        audioRef.current.src = 'data:audio/wav;base64,UklGRogAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YWQAAACAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICA';
+        audioRef.current.loop = true;
+        audioRef.current.play().catch(() => {});
       }
 
       const ensureYtPlayer = () => {
@@ -623,7 +649,11 @@ export function MusicProvider({ children }: { children: React.ReactNode }) {
         }
 
         // ---- Online: resolve stream through the API chain ----
-        const res = await fetch(`/api/stream/${videoId}`);
+        const queryParams = new URLSearchParams();
+        if (currentTrack.title) queryParams.set('title', currentTrack.title);
+        if (currentTrack.artist) queryParams.set('artist', currentTrack.artist);
+        const queryStr = queryParams.toString();
+        const res = await fetch(`/api/stream/${videoId}${queryStr ? `?${queryStr}` : ''}`);
         if (!res.ok) {
           // If server stream extraction fails (e.g. Vercel datacenter IP blocked by bot-check),
           // fallback directly to the YouTube Player API
@@ -639,14 +669,20 @@ export function MusicProvider({ children }: { children: React.ReactNode }) {
           if (ytIntervalRef.current) clearInterval(ytIntervalRef.current);
           if (ytPlayerRef.current?.pauseVideo) ytPlayerRef.current.pauseVideo();
 
-          const proxyUrl = `/api/audio-proxy?url=${encodeURIComponent(data.url)}&ua=${encodeURIComponent(data.userAgent || '')}`;
+          // If the audio URL is already CORS-friendly and directly playable (e.g. JioSaavn CDN),
+          // play it directly without passing through proxy for zero TTFB lag and instant background audio!
+          const isDirectCdn = data.url.includes('saavncdn.com');
+          const finalAudioSrc = isDirectCdn
+            ? data.url
+            : `/api/audio-proxy?url=${encodeURIComponent(data.url)}&ua=${encodeURIComponent(data.userAgent || '')}`;
+
           const audio = audioRef.current;
-          audio.src = proxyUrl;
+          audio.src = finalAudioSrc;
           try {
             await audio.play();
             setIsPlaying(true);
           } catch (playErr) {
-            console.warn('Audio-proxy playback error, trying fallback:', playErr);
+            console.warn('Audio playback error, trying fallback:', playErr);
             startYtFallback(videoId);
           }
         } else {
