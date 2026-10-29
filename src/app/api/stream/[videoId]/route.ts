@@ -4,8 +4,30 @@ import {
   getVisitorData
 } from '@/lib/innertube';
 
-// playbackClients from InnerTubeClient.kt (line 1171-1209) — exact order
+// Playback clients for stream extraction
+// ANDROID is prioritized first because it does not require visitor data and consistently
+// returns playable streams without triggering "Sign in to confirm you're not a bot" on datacenter IPs.
 const PLAYBACK_CLIENTS = [
+  {
+    name: "ANDROID",
+    client: {
+      clientName: "ANDROID",
+      clientVersion: "21.26.364",
+      androidSdkVersion: 30,
+      userAgent: "com.google.android.youtube/21.26.364 (Linux; U; Android 11) gzip",
+      hl: "en",
+      timeZone: "UTC",
+      utcOffsetMinutes: 0,
+      osName: "Android",
+      osVersion: "11"
+    },
+    clientNameHeader: "3",
+    versionHeader: "21.26.364",
+    userAgent: "com.google.android.youtube/21.26.364 (Linux; U; Android 11) gzip",
+    url: "https://www.youtube.com/youtubei/v1/player?prettyPrint=false",
+    needsVisitorData: false,
+    key: null
+  },
   {
     name: "VISIONOS",
     client: {
@@ -69,26 +91,6 @@ const PLAYBACK_CLIENTS = [
     url: "https://www.youtube.com/youtubei/v1/player?key=AIzaSyB-63vPrdThhKuerbB2N_l7Kwwcxj6yUAc&prettyPrint=false",
     needsVisitorData: true,
     key: "AIzaSyB-63vPrdThhKuerbB2N_l7Kwwcxj6yUAc"
-  },
-  {
-    name: "ANDROID",
-    client: {
-      clientName: "ANDROID",
-      clientVersion: "21.26.364",
-      androidSdkVersion: 30,
-      userAgent: "com.google.android.youtube/21.26.364 (Linux; U; Android 11) gzip",
-      hl: "en",
-      timeZone: "UTC",
-      utcOffsetMinutes: 0,
-      osName: "Android",
-      osVersion: "11"
-    },
-    clientNameHeader: "3",
-    versionHeader: "21.26.364",
-    userAgent: "com.google.android.youtube/21.26.364 (Linux; U; Android 11) gzip",
-    url: "https://www.youtube.com/youtubei/v1/player?prettyPrint=false",
-    needsVisitorData: false,
-    key: null
   }
 ];
 
