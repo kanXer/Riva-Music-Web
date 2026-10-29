@@ -19,10 +19,6 @@ const SEARCH_FILTER_PARAMS: Record<string, string> = {
 
 const DURATION_REGEX = /^\d{1,2}:\d{2}(?::\d{2})?$/;
 
-let cachedVisitorData: string | null = null;
-let visitorDataPrimedAt = 0;
-const SESSION_TTL = 30 * 60 * 1000;
-
 export function upgradeThumbnail(url: string | null | undefined): string | null {
   if (!url) return null;
   let clean = url;
@@ -43,33 +39,72 @@ export function upgradeThumbnail(url: string | null | undefined): string | null 
   return clean;
 }
 
-export async function getVisitorData(force = false): Promise<string | null> {
+let cachedVisitorData: string | null = null;
+let cachedCookies: string | null = null;
+let visitorDataPrimedAt = 0;
+const SESSION_TTL = 30 * 60 * 1000;
+
+export interface YouTubeSessionData {
+  visitorData: string | null;
+  cookieHeader: string | null;
+}
+
+export async function getYouTubeSession(videoId = "kJQP7kiw5Fk", force = false): Promise<YouTubeSessionData> {
   const now = Date.now();
   if (!force && cachedVisitorData && (now - visitorDataPrimedAt < SESSION_TTL)) {
-    return cachedVisitorData;
+    return {
+      visitorData: cachedVisitorData,
+      cookieHeader: cachedCookies
+    };
   }
+
   try {
-    const res = await fetch("https://www.youtube.com/watch?v=kJQP7kiw5Fk&hl=en", {
+    const res = await fetch(`https://www.youtube.com/watch?v=${videoId}&hl=en`, {
       headers: {
         "User-Agent": WEB_UA,
         "Accept-Language": "en-US,en;q=0.9",
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
       }
     });
+
+    // Capture response cookies (VISITOR_INFO1_LIVE, YSC, __Secure-YNID, etc.)
+    const rawCookies: string[] = typeof (res.headers as any).getSetCookie === 'function'
+      ? (res.headers as any).getSetCookie()
+      : [res.headers.get("set-cookie") || ""];
+
+    const cookieHeader = rawCookies
+      .map(c => (c || "").split(";")[0].trim())
+      .filter(Boolean)
+      .join("; ");
+
     const html = await res.text();
     const match =
-      html.match(/"VISITOR_DATA":"([^"]+)"/) ||
+      html.match(/"INNERTUBE_CONTEXT_VISITOR_DATA":"([^"]+)"/) ||
       html.match(/"visitorData":"([^"]+)"/) ||
-      html.match(/"INNERTUBE_CONTEXT_VISITOR_DATA":"([^"]+)"/);
+      html.match(/"VISITOR_DATA":"([^"]+)"/);
+
     if (match && match[1]) {
       cachedVisitorData = match[1];
+      cachedCookies = cookieHeader || null;
       visitorDataPrimedAt = now;
-      return cachedVisitorData;
+      return { visitorData: cachedVisitorData, cookieHeader: cachedCookies };
+    }
+    if (cookieHeader) {
+      cachedCookies = cookieHeader;
     }
   } catch (err) {
-    console.error("Error fetching visitorData:", err);
+    console.error("Error fetching YouTube session:", err);
   }
-  return cachedVisitorData;
+
+  return {
+    visitorData: cachedVisitorData,
+    cookieHeader: cachedCookies
+  };
+}
+
+export async function getVisitorData(force = false): Promise<string | null> {
+  const session = await getYouTubeSession("kJQP7kiw5Fk", force);
+  return session.visitorData;
 }
 
 export function musicRemixContext(gl = "IN") {

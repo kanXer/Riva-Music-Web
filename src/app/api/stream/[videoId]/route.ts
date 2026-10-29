@@ -1,33 +1,11 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { NextRequest, NextResponse } from 'next/server';
 import {
-  getVisitorData
+  getYouTubeSession
 } from '@/lib/innertube';
 
-// Playback clients for stream extraction
-// ANDROID is prioritized first because it does not require visitor data and consistently
-// returns playable streams without triggering "Sign in to confirm you're not a bot" on datacenter IPs.
+// Playback clients for stream extraction — exact order and configuration from RivaMusic InnerTubeClient.kt
 const PLAYBACK_CLIENTS = [
-  {
-    name: "ANDROID",
-    client: {
-      clientName: "ANDROID",
-      clientVersion: "21.26.364",
-      androidSdkVersion: 30,
-      userAgent: "com.google.android.youtube/21.26.364 (Linux; U; Android 11) gzip",
-      hl: "en",
-      timeZone: "UTC",
-      utcOffsetMinutes: 0,
-      osName: "Android",
-      osVersion: "11"
-    },
-    clientNameHeader: "3",
-    versionHeader: "21.26.364",
-    userAgent: "com.google.android.youtube/21.26.364 (Linux; U; Android 11) gzip",
-    url: "https://www.youtube.com/youtubei/v1/player?prettyPrint=false",
-    needsVisitorData: false,
-    key: null
-  },
   {
     name: "VISIONOS",
     client: {
@@ -91,6 +69,26 @@ const PLAYBACK_CLIENTS = [
     url: "https://www.youtube.com/youtubei/v1/player?key=AIzaSyB-63vPrdThhKuerbB2N_l7Kwwcxj6yUAc&prettyPrint=false",
     needsVisitorData: true,
     key: "AIzaSyB-63vPrdThhKuerbB2N_l7Kwwcxj6yUAc"
+  },
+  {
+    name: "ANDROID",
+    client: {
+      clientName: "ANDROID",
+      clientVersion: "21.26.364",
+      androidSdkVersion: 30,
+      userAgent: "com.google.android.youtube/21.26.364 (Linux; U; Android 11) gzip",
+      hl: "en",
+      timeZone: "UTC",
+      utcOffsetMinutes: 0,
+      osName: "Android",
+      osVersion: "11"
+    },
+    clientNameHeader: "3",
+    versionHeader: "21.26.364",
+    userAgent: "com.google.android.youtube/21.26.364 (Linux; U; Android 11) gzip",
+    url: "https://www.youtube.com/youtubei/v1/player?prettyPrint=false",
+    needsVisitorData: false,
+    key: null
   }
 ];
 
@@ -98,7 +96,12 @@ function isBotBlocked(messages: string[]): boolean {
   return messages.some(m => m.toLowerCase().includes("confirm you") || m.toLowerCase().includes("not a bot"));
 }
 
-async function tryPlayer(videoId: string, clientSpec: typeof PLAYBACK_CLIENTS[number], vd: string | null) {
+async function tryPlayer(
+  videoId: string,
+  clientSpec: typeof PLAYBACK_CLIENTS[number],
+  vd: string | null,
+  cookieHeader: string | null
+) {
   const context: any = { client: { ...clientSpec.client } };
   if (clientSpec.needsVisitorData && vd) context.client.visitorData = vd;
 
@@ -111,10 +114,10 @@ async function tryPlayer(videoId: string, clientSpec: typeof PLAYBACK_CLIENTS[nu
   };
   if (clientSpec.needsVisitorData && vd) headers["X-Goog-Visitor-Id"] = vd;
 
-  // Support YOUTUBE_COOKIE environment variable (for cloud/Vercel datacenter IPs)
-  const cookie = process.env.YOUTUBE_COOKIE;
-  if (cookie) {
-    headers["Cookie"] = cookie;
+  // Use primed session cookies (from watch page response) or YOUTUBE_COOKIE env override
+  const effectiveCookie = process.env.YOUTUBE_COOKIE || cookieHeader;
+  if (effectiveCookie) {
+    headers["Cookie"] = effectiveCookie;
   }
 
   const resp = await fetch(clientSpec.url, {
@@ -141,7 +144,7 @@ export async function GET(
   if (!videoId) return NextResponse.json({ error: "Missing videoId" }, { status: 400 });
 
   try {
-    let vd = await getVisitorData();
+    let session = await getYouTubeSession(videoId);
     let lastData: any = null;
     const botMessages: string[] = [];
     const clientAttempts: Array<{ name: string; status?: string; reason?: string; formatsCount?: number }> = [];
@@ -149,7 +152,7 @@ export async function GET(
     // Pass 1: full client chain in priority order
     for (const clientSpec of PLAYBACK_CLIENTS) {
       try {
-        const data = await tryPlayer(videoId, clientSpec, vd);
+        const data = await tryPlayer(videoId, clientSpec, session.visitorData, session.cookieHeader);
         lastData = data;
         const fmts = (data?.streamingData?.adaptiveFormats || []).concat(data?.streamingData?.formats || []).filter((f: any) => f.url);
         clientAttempts.push({
@@ -171,12 +174,12 @@ export async function GET(
       }
     }
 
-    // Pass 2: only if all failed and we saw bot block
+    // Pass 2: only if all failed and we saw bot block -> refresh session for this video
     if (isBotBlocked(botMessages)) {
-      vd = await getVisitorData(true);
+      session = await getYouTubeSession(videoId, true);
       for (const clientSpec of PLAYBACK_CLIENTS) {
         try {
-          const data = await tryPlayer(videoId, clientSpec, vd);
+          const data = await tryPlayer(videoId, clientSpec, session.visitorData, session.cookieHeader);
           lastData = data;
           if (data?.playabilityStatus?.status === "OK") {
             const resolved = selectStream(data, clientSpec.userAgent);
