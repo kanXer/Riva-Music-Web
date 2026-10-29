@@ -1,26 +1,201 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --color-ink: #EFE2DC;
+  --color-ink-soft: #E9DAD3;
+  --color-panel: #F7ECE7;
+  --color-panel-elevated: #FFF6F2;
+  --color-panel-border: #DCC2BA;
+  --color-lime: #E8503A;
+  --color-lime-deep: #C63F2B;
+  --color-coral: #DC2626;
+  --color-sky: #B91C1C;
+  --color-violet: #991B1B;
+  --color-text-primary: #170908;
+  --color-text-secondary: #4A3430;
+  --color-text-faint: #6D4D48;
+  --color-danger: #E63B3B;
+
+  --color-bg-outer: #F4E6E0;
+  --color-bg-deep: #E7D6CF;
+  --color-player-top: #FBEAE4;
+  --color-player-mid: #F3DDD5;
+
+  --color-section-a-top: #FDF0EA;
+  --color-section-a-mid: #F7DFD5;
+  --color-section-a-bottom: #FFEFE8;
+
+  --color-banner-from: #FCEAE2;
+  --color-banner-via: #F7DFD5;
+  --color-banner-to: #EFE2DC;
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+.dark {
+  --color-ink: #140A0A;
+  --color-ink-soft: #1C0E0D;
+  --color-panel: #261312;
+  --color-panel-elevated: #331A18;
+  --color-panel-border: #4C2723;
+  --color-lime: #FF6B52;
+  --color-lime-deep: #E04F35;
+  --color-coral: #FFAB91;
+  --color-sky: #FF8A80;
+  --color-violet: #F87171;
+  --color-text-primary: #FDF6F4;
+  --color-text-secondary: #C7A8A3;
+  --color-text-faint: #96726D;
+  --color-danger: #FF3B3B;
+
+  --color-bg-outer: #170C0C;
+  --color-bg-deep: #100808;
+  --color-player-top: #2B1210;
+  --color-player-mid: #1D0C0B;
+
+  --color-section-a-top: #2E1410;
+  --color-section-a-mid: #3A1C12;
+  --color-section-a-bottom: #1D0F0C;
+
+  --color-banner-from: #3B1714;
+  --color-banner-via: #24100E;
+  --color-banner-to: #140807;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+html {
+  color-scheme: light dark;
+  overscroll-behavior-y: none;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: linear-gradient(180deg, var(--color-bg-outer) 0%, var(--color-ink) 38%, var(--color-bg-deep) 100%) fixed;
+  color: var(--color-text-primary);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  user-select: none;
+  -webkit-font-smoothing: antialiased;
+  overscroll-behavior-y: none;
+}
+
+/* Custom scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-panel-border);
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-lime);
+}
+
+@keyframes searchslide {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(400%); }
+}
+
+@keyframes spin-slow {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.animate-spin-slow {
+  animation: spin-slow 20s linear infinite;
+}
+
+.paused {
+  animation-play-state: paused !important;
+}
+
+/* Hide horizontal scrollbars (carousels) */
+.no-scrollbar {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+/* Lyric scroll area */
+.lyric-scroll {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.lyric-scroll::-webkit-scrollbar {
+  display: none;
+}
+
+/* Track-change swap animation (swipe/button → new song enters) */
+@keyframes rivaSwapUp {
+  from { opacity: 0; transform: translateY(52px) scale(0.97); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes rivaSwapDown {
+  from { opacity: 0; transform: translateY(-52px) scale(0.97); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes rivaSwapIn {
+  from { opacity: 0; transform: scale(0.93); }
+  to { opacity: 1; transform: none; }
+}
+.riva-swap-up { animation: rivaSwapUp 0.42s cubic-bezier(0.22, 1, 0.36, 1) both; }
+.riva-swap-down { animation: rivaSwapDown 0.42s cubic-bezier(0.22, 1, 0.36, 1) both; }
+.riva-swap-in { animation: rivaSwapIn 0.42s cubic-bezier(0.22, 1, 0.36, 1) both; }
+
+/* App-style seek slider (M3: 5dp track, lime active, no stops) */
+.riva-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 20px;
+  background: transparent;
+  cursor: pointer;
+}
+.riva-slider::-webkit-slider-runnable-track {
+  height: 5px;
+  border-radius: 9999px;
+  background: linear-gradient(
+    to right,
+    var(--color-lime) 0%,
+    var(--color-lime) var(--fill, 0%),
+    color-mix(in srgb, var(--color-panel-border) 55%, transparent) var(--fill, 0%),
+    color-mix(in srgb, var(--color-panel-border) 55%, transparent) 100%
+  );
+}
+.riva-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  margin-top: -4.5px;
+  border-radius: 9999px;
+  background: var(--color-lime);
+  border: none;
+  transition: width 0.1s, height 0.1s;
+}
+.riva-slider:active::-webkit-slider-thumb {
+  width: 17px;
+  height: 17px;
+  margin-top: -6px;
+}
+.riva-slider::-moz-range-track {
+  height: 5px;
+  border-radius: 9999px;
+  background: color-mix(in srgb, var(--color-panel-border) 55%, transparent);
+}
+.riva-slider::-moz-range-progress {
+  height: 5px;
+  border-radius: 9999px;
+  background: var(--color-lime);
+}
+.riva-slider::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border: none;
+  border-radius: 9999px;
+  background: var(--color-lime);
 }

@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="100%" height="100%">
+  <!-- Definitions & subtle glow/shadow if needed -->
+  <defs>
+    <clipPath id="circleClip">
+      <circle cx="256" cy="256" r="248" />
+    </clipPath>
+  </defs>
+
+  <!-- Circular Badge Background (#181b26) -->
+  <circle cx="256" cy="256" r="248" fill="#181b26" />
+
+  <!-- Equalizer / Soundwave Abstract Graphic (Centered in 512x512) -->
+  <g id="soundwave-capsules">
+    <!-- Bar 1 (Leftmost): Neon lime #b8f828, medium height -->
+    <!-- Center X: 120, Width: 40, Height: 150 (Y: 181 to 331) -->
+    <rect x="100" y="181" width="40" height="150" rx="20" fill="#b8f828" />
+
+    <!-- Bar 2: Neon lime #b8f828, tall vertical pill -->
+    <!-- Center X: 180, Width: 40, Height: 240 (Y: 136 to 376) -->
+    <rect x="160" y="136" width="40" height="240" rx="20" fill="#b8f828" />
+
+    <!-- Bar 3 (Center): Sky blue / soft cyan #70baff, medium-tall -->
+    <!-- Center X: 240, Width: 40, Height: 190 (Y: 161 to 351) -->
+    <rect x="220" y="161" width="40" height="190" rx="20" fill="#70baff" />
+
+    <!-- Bar 4: Neon lime #b8f828, tallest vertical pill -->
+    <!-- Center X: 300, Width: 40, Height: 300 (Y: 106 to 406) -->
+    <rect x="280" y="106" width="40" height="300" rx="20" fill="#b8f828" />
+
+    <!-- Bar 5 (Right Accent Group): -->
+    <!-- Pink (#ff7597) vertical rounded pill -->
+    <!-- Center X: 360, Width: 40, Height: 160 (Y: 126 to 286) -->
+    <rect x="340" y="126" width="40" height="160" rx="20" fill="#ff7597" />
+
+    <!-- Coral-orange (#ff5a36) horizontal rounded pill bar sitting directly under/connected extending to the right -->
+    <!-- Y: 296, Height: 40, Width: 80 (from X: 340 to 420), rx: 20 -->
+    <rect x="340" y="296" width="80" height="40" rx="20" fill="#ff5a36" />
+  </g>
+</svg>
