@@ -159,6 +159,9 @@ export function MusicProvider({ children }: { children: React.ReactNode }) {
   const [streamError, setStreamError] = useState<string | null>(null);
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const ytPlayerRef = useRef<any>(null);
+  const isUsingYtRef = useRef<boolean>(false);
+  const ytIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const sleepTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Refs for stable callbacks (MediaSession / ended handler closures)
@@ -265,13 +268,20 @@ export function MusicProvider({ children }: { children: React.ReactNode }) {
   };
 
   const updateMediaSessionPositionState = () => {
-    if ('mediaSession' in navigator && 'setPositionState' in navigator.mediaSession && audioRef.current) {
+    if ('mediaSession' in navigator && 'setPositionState' in navigator.mediaSession) {
       try {
-        if (audioRef.current.duration && !isNaN(audioRef.current.duration)) {
+        const curDur = isUsingYtRef.current
+          ? (ytPlayerRef.current?.getDuration ? ytPlayerRef.current.getDuration() : 0)
+          : (audioRef.current?.duration || 0);
+        const curPos = isUsingYtRef.current
+          ? (ytPlayerRef.current?.getCurrentTime ? ytPlayerRef.current.getCurrentTime() : 0)
+          : (audioRef.current?.currentTime || 0);
+
+        if (curDur && !isNaN(curDur) && curDur > 0) {
           navigator.mediaSession.setPositionState({
-            duration: audioRef.current.duration,
-            playbackRate: audioRef.current.playbackRate || 1,
-            position: audioRef.current.currentTime || 0
+            duration: curDur,
+            playbackRate: 1,
+            position: Math.min(curPos, curDur)
           });
         }
       } catch (_) {}
@@ -279,7 +289,11 @@ export function MusicProvider({ children }: { children: React.ReactNode }) {
   };
 
   const seek = useCallback((seconds: number) => {
-    if (audioRef.current) {
+    if (isUsingYtRef.current && ytPlayerRef.current?.seekTo) {
+      ytPlayerRef.current.seekTo(seconds, true);
+      setCurrentTime(seconds);
+      updateMediaSessionPositionState();
+    } else if (audioRef.current) {
       audioRef.current.currentTime = seconds;
       setCurrentTime(seconds);
       updateMediaSessionPositionState();
@@ -445,6 +459,7 @@ export function MusicProvider({ children }: { children: React.ReactNode }) {
   // Sync volume
   useEffect(() => {
     if (audioRef.current) audioRef.current.volume = volume;
+    if (ytPlayerRef.current?.setVolume) ytPlayerRef.current.setVolume(volume * 100);
   }, [volume]);
 
   // Load stream & lyrics on track change
@@ -474,6 +489,109 @@ export function MusicProvider({ children }: { children: React.ReactNode }) {
 
     const resetStreamError = () => setStreamError(null);
     resetStreamError();
+
+    // Helper: start YT IFrame playback fallback
+    const startYtFallback = (vid: string) => {
+      isUsingYtRef.current = true;
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current.src = '';
+      }
+
+      const ensureYtPlayer = () => {
+        if (!isSubscribed) return;
+        const YT = (window as any).YT;
+        if (!YT || !YT.Player) {
+          // Load API script if not present
+          if (!document.getElementById('yt-iframe-api-script')) {
+            const tag = document.createElement('script');
+            tag.id = 'yt-iframe-api-script';
+            tag.src = 'https://www.youtube.com/iframe_api';
+            document.head.appendChild(tag);
+          }
+          setTimeout(ensureYtPlayer, 300);
+          return;
+        }
+
+        if (ytPlayerRef.current && ytPlayerRef.current.loadVideoById) {
+          try {
+            ytPlayerRef.current.loadVideoById(vid);
+            ytPlayerRef.current.playVideo();
+            setIsPlaying(true);
+            setIsLoadingAudio(false);
+          } catch (_) {
+            setTimeout(ensureYtPlayer, 300);
+          }
+          return;
+        }
+
+        // Initialize player in the hidden container
+        try {
+          ytPlayerRef.current = new YT.Player('riva-hidden-yt-player', {
+            height: '10',
+            width: '10',
+            videoId: vid,
+            playerVars: {
+              autoplay: 1,
+              controls: 0,
+              disablekb: 1,
+              enablejsapi: 1,
+              playsinline: 1,
+              origin: window.location.origin
+            },
+            events: {
+              onReady: (event: any) => {
+                if (!isSubscribed) return;
+                event.target.setVolume(volume * 100);
+                event.target.playVideo();
+                setIsPlaying(true);
+                setIsLoadingAudio(false);
+              },
+              onStateChange: (event: any) => {
+                if (!isSubscribed) return;
+                // 1: PLAYING, 2: PAUSED, 0: ENDED
+                if (event.data === 1) {
+                  setIsPlaying(true);
+                  setIsLoadingAudio(false);
+                  if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'playing';
+                  const dur = event.target.getDuration ? event.target.getDuration() : 0;
+                  if (dur) setDuration(dur);
+                } else if (event.data === 2) {
+                  setIsPlaying(false);
+                  if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'paused';
+                } else if (event.data === 0) {
+                  handleTrackEnded();
+                }
+              },
+              onError: () => {
+                if (!isSubscribed) return;
+                setIsLoadingAudio(false);
+                setIsPlaying(false);
+                setStreamError('Playback restricted for this video.');
+              }
+            }
+          });
+        } catch (e) {
+          console.warn("YT player init retry:", e);
+          setTimeout(ensureYtPlayer, 500);
+        }
+      };
+
+      ensureYtPlayer();
+
+      // Start ticker for currentTime & duration
+      if (ytIntervalRef.current) clearInterval(ytIntervalRef.current);
+      ytIntervalRef.current = setInterval(() => {
+        if (isUsingYtRef.current && ytPlayerRef.current && ytPlayerRef.current.getCurrentTime) {
+          const t = ytPlayerRef.current.getCurrentTime() || 0;
+          const d = ytPlayerRef.current.getDuration ? (ytPlayerRef.current.getDuration() || 0) : 0;
+          setCurrentTime(t);
+          if (d > 0) setDuration(d);
+          updateMediaSessionPositionState();
+        }
+      }, 500);
+    };
+
     const fetchStream = async () => {
       setIsLoadingAudio(true);
       try {
@@ -481,7 +599,10 @@ export function MusicProvider({ children }: { children: React.ReactNode }) {
 
         // ---- Offline-first: if the track is downloaded, play the local blob ----
         if (await isTrackDownloaded(videoId)) {
-          // If currentTrack doesn't have an offline cover blob URL, hydrate it
+          isUsingYtRef.current = false;
+          if (ytIntervalRef.current) clearInterval(ytIntervalRef.current);
+          if (ytPlayerRef.current?.pauseVideo) ytPlayerRef.current.pauseVideo();
+
           if (!currentTrack.thumbnailUrl?.startsWith('blob:')) {
             const localCover = await getCoverUrl(videoId);
             if (localCover && isSubscribed) {
@@ -491,7 +612,7 @@ export function MusicProvider({ children }: { children: React.ReactNode }) {
 
           const localUrl = await getPlaybackUrl(videoId);
           if (!isSubscribed || !localUrl || !audioRef.current) return;
-          audioRef.current.src = localUrl; // previous blob URL revoked inside getPlaybackUrl
+          audioRef.current.src = localUrl;
           try {
             await audioRef.current.play();
             setIsPlaying(true);
@@ -503,12 +624,21 @@ export function MusicProvider({ children }: { children: React.ReactNode }) {
 
         // ---- Online: resolve stream through the API chain ----
         const res = await fetch(`/api/stream/${videoId}`);
-        if (!res.ok) throw new Error('Stream fetch failed');
+        if (!res.ok) {
+          // If server stream extraction fails (e.g. Vercel datacenter IP blocked by bot-check),
+          // fallback directly to the YouTube Player API
+          startYtFallback(videoId);
+          return;
+        }
+
         const data = await res.json();
         if (!isSubscribed) return;
 
         if (data.url && audioRef.current) {
-          // Direct browser audio proxy pipe
+          isUsingYtRef.current = false;
+          if (ytIntervalRef.current) clearInterval(ytIntervalRef.current);
+          if (ytPlayerRef.current?.pauseVideo) ytPlayerRef.current.pauseVideo();
+
           const proxyUrl = `/api/audio-proxy?url=${encodeURIComponent(data.url)}&ua=${encodeURIComponent(data.userAgent || '')}`;
           const audio = audioRef.current;
           audio.src = proxyUrl;
@@ -516,18 +646,18 @@ export function MusicProvider({ children }: { children: React.ReactNode }) {
             await audio.play();
             setIsPlaying(true);
           } catch (playErr) {
-            console.warn('Playback error on audio-proxy:', playErr);
+            console.warn('Audio-proxy playback error, trying fallback:', playErr);
+            startYtFallback(videoId);
           }
+        } else {
+          startYtFallback(videoId);
         }
       } catch (err) {
-        console.error('Playback error:', err);
-        if (isSubscribed) {
-          setStreamError(isOnlineRef.current
-            ? 'Could not load this track. Try another one.'
-            : 'You are offline — only downloaded tracks can play.');
-        }
+        console.warn('Server stream resolution error, falling back to YouTube engine:', err);
+        const videoId = currentTrack.videoId || currentTrack.id;
+        startYtFallback(videoId);
       } finally {
-        if (isSubscribed) setIsLoadingAudio(false);
+        if (isSubscribed && !isUsingYtRef.current) setIsLoadingAudio(false);
       }
     };
 
@@ -589,25 +719,29 @@ export function MusicProvider({ children }: { children: React.ReactNode }) {
   };
 
   const togglePlay = () => {
-    if (!audioRef.current || !currentTrack) return;
+    if (!currentTrack) return;
     if (isPlaying) {
-      audioRef.current.pause();
-      setIsPlaying(false);
+      pause();
     } else {
-      audioRef.current.play();
-      setIsPlaying(true);
+      resume();
     }
   };
 
   const pause = () => {
-    if (audioRef.current) {
+    if (isUsingYtRef.current && ytPlayerRef.current?.pauseVideo) {
+      ytPlayerRef.current.pauseVideo();
+      setIsPlaying(false);
+    } else if (audioRef.current) {
       audioRef.current.pause();
       setIsPlaying(false);
     }
   };
 
   const resume = () => {
-    if (audioRef.current) {
+    if (isUsingYtRef.current && ytPlayerRef.current?.playVideo) {
+      ytPlayerRef.current.playVideo();
+      setIsPlaying(true);
+    } else if (audioRef.current) {
       audioRef.current.play();
       setIsPlaying(true);
     }
@@ -817,6 +951,23 @@ export function MusicProvider({ children }: { children: React.ReactNode }) {
       sleepRemainingSeconds,
       setSleepTimerMinutes
     }}>
+      {/* Hidden YouTube Engine Container for guaranteed browser playback */}
+      <div
+        aria-hidden="true"
+        style={{
+          position: 'fixed',
+          bottom: -100,
+          right: -100,
+          width: 10,
+          height: 10,
+          opacity: 0.01,
+          pointerEvents: 'none',
+          overflow: 'hidden',
+          zIndex: -9999
+        }}
+      >
+        <div id="riva-hidden-yt-player" />
+      </div>
       {children}
     </MusicContext.Provider>
   );
