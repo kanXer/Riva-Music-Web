@@ -268,15 +268,25 @@ export async function startDownload(track: StartDownloadTrack): Promise<void> {
     await requestPersistence();
     await assertQuota(15 * 1024 * 1024); // sanity floor: refuse early when nearly full
 
-    // 1. Resolve the current stream URL for this video
-    const streamRes = await fetch(`/api/stream/${id}`);
+    // 1. Resolve the current stream URL for this video (pass title & artist for fast resolution)
+    const queryParams = new URLSearchParams();
+    if (track.title) queryParams.set('title', track.title);
+    if (track.artist) queryParams.set('artist', track.artist);
+    const qs = queryParams.toString();
+    const streamRes = await fetch(`/api/stream/${id}${qs ? `?${qs}` : ''}`);
     if (!streamRes.ok) throw new Error('Could not resolve the stream (is this track playable?)');
     const streamData = await streamRes.json();
     if (!streamData.url) throw new Error('No audio URL available for this track');
-    const proxyUrl = `/api/audio-proxy?url=${encodeURIComponent(streamData.url)}&ua=${encodeURIComponent(streamData.userAgent || '')}`;
+
+    // If stream URL is direct CORS CDN (e.g. JioSaavn), download directly for speed & stability;
+    // otherwise use our server audio-proxy.
+    const isDirect = streamData.url.includes('saavncdn.com');
+    const audioDownloadUrl = isDirect
+      ? streamData.url
+      : `/api/audio-proxy?url=${encodeURIComponent(streamData.url)}&ua=${encodeURIComponent(streamData.userAgent || '')}`;
 
     // 2. Download audio with progress
-    const audioBlob = await fetchBlobWithProgress(proxyUrl, (received, total) => {
+    const audioBlob = await fetchBlobWithProgress(audioDownloadUrl, (received, total) => {
       setDownloadState(id, {
         status: 'downloading',
         progress: total > 0 ? received / total : -1,

@@ -120,7 +120,7 @@ export function Player() {
   const dlState = useDownloadState(currentTrackId);
   const downloadedIds = useDownloadedIds();
   const { isOnline } = useOfflineStatus();
-  const isDownloaded = currentTrackId ? downloadedIds.has(currentTrackId) : false;
+  const isDownloaded = currentTrackId ? (dlState.status === 'downloaded' || downloadedIds.has(currentTrackId)) : false;
 
   // Reset view when track changes (render-time adjustment pattern)
   const [prevTrackId, setPrevTrackId] = useState<string | null>(currentTrack?.id ?? null);

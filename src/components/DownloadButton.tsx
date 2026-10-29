@@ -23,6 +23,20 @@ export function DownloadButton({ track, size = 16 }: { track: StartDownloadTrack
 
   const containerSize = size + 16;
 
+  const isDownloaded = dl.status === 'downloaded' || downloadedIds.has(id);
+
+  if (isDownloaded) {
+    return (
+      <span
+        title={`Downloaded${track.title ? `: ${track.title}` : ''}`}
+        className="flex items-center justify-center text-[var(--color-lime)]"
+        style={{ width: containerSize, height: containerSize }}
+      >
+        <Check size={size} strokeWidth={3} />
+      </span>
+    );
+  }
+
   if (dl.status === 'downloading') {
     const pct = Math.max(0, Math.min(100, Math.round(dl.progress * 100)));
     const strokeWidth = 2.5;
@@ -67,18 +81,6 @@ export function DownloadButton({ track, size = 16 }: { track: StartDownloadTrack
         <span className="absolute text-[8px] font-black text-[var(--color-lime)] font-mono leading-none">
           {pct > 0 ? pct : ''}
         </span>
-      </span>
-    );
-  }
-
-  if (downloadedIds.has(id)) {
-    return (
-      <span
-        title={`Downloaded${track.title ? `: ${track.title}` : ''}`}
-        className="flex items-center justify-center text-[var(--color-lime)]"
-        style={{ width: containerSize, height: containerSize }}
-      >
-        <Check size={size} strokeWidth={3} />
       </span>
     );
   }
