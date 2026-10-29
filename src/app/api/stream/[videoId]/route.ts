@@ -172,6 +172,8 @@ export async function GET(
 
     return NextResponse.json({
       error: "Stream resolution failed on all clients",
+      commit: "dcef206",
+      attempted: PLAYBACK_CLIENTS.map(c => c.name),
       playability: lastData?.playabilityStatus?.status,
       reason: lastData?.playabilityStatus?.reason
     }, { status: 404 });
