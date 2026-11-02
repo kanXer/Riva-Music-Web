@@ -7,7 +7,7 @@ export const dynamic = 'force-dynamic';
 
 export async function POST(request: Request) {
   const baseUrl = (process.env.RIVA_MUSIC_URL || new URL(request.url).origin).replace(/\/$/, '');
-  const playerResourceUri = 'ui://riva-music/player/v4.html';
+  const playerResourceUri = 'ui://riva-music/player/v5.html';
   const api = async (path: string, params: Record<string, string | number | undefined> = {}) => {
     const url = new URL(`${baseUrl}/api/${path}`);
     for (const [key, value] of Object.entries(params)) if (value !== undefined && value !== '') url.searchParams.set(key, String(value));
@@ -46,16 +46,9 @@ export async function POST(request: Request) {
 (() => {
   const base=${escapedBaseUrl};
   const root=document.getElementById('tracks'), audio=document.getElementById('audio');
-  const status=document.getElementById('status'), playButton=document.getElementById('playBest'); let tracks=[];
-  const output=window.openai&&window.openai.toolOutput;
-  tracks=output&&(output.tracks||output.results)||[];
-  let selected=tracks[0];
-  if(!selected){document.getElementById('current').textContent='No matching song found';root.textContent='Try another song or artist.';return}
-  document.getElementById('count').textContent=tracks.length+' results';
-  document.getElementById('listHeader').hidden=tracks.length<2;
-  document.getElementById('current').textContent=selected.title||'Selected song';
-  document.getElementById('artist').textContent=selected.artist||'Riva Music';
+  const status=document.getElementById('status'), playButton=document.getElementById('playBest'); let tracks=[],selected=null,initialized=false;
   const play=async (track=selected) => {
+    if(!track)return;
     if(audio.src){try{await audio.play();status.textContent='';return}catch(error){status.textContent=error instanceof Error?error.message:'Playback could not start';playButton.hidden=false;return}}
     playButton.disabled=true;playButton.textContent='Loading song…';
     selected=track;
@@ -79,19 +72,35 @@ export async function POST(request: Request) {
       playButton.textContent='Play best match';playButton.disabled=false;playButton.hidden=false;
     }
   };
-  tracks.slice(1).forEach(track=>{
-    const row=document.createElement('div');row.className='track';row.setAttribute('role','listitem');
-    const meta=document.createElement('div');meta.className='meta';
-    const title=document.createElement('div');title.className='title trackTitle';title.textContent=track.title||'Untitled track';
-    const artist=document.createElement('div');artist.className='sub trackArtist';artist.textContent=track.artist||'YouTube Music';meta.append(title,artist);
-    const button=document.createElement('button');button.className='playSmall';button.type='button';button.textContent='Play';button.setAttribute('aria-label','Play '+(track.title||'track'));
-    button.addEventListener('click',()=>{selected=track;audio.removeAttribute('src');audio.load();play(track)});row.append(meta,button);root.append(row);
-  });
+  const renderResults=output=>{
+    if(initialized||!output)return;
+    const results=output.tracks||output.results||[];
+    if(!Array.isArray(results)||results.length===0)return;
+    tracks=results;selected=tracks.find(track=>(track.videoId||track.id)===output.selectedTrackId)||tracks[0];initialized=true;
+    document.getElementById('count').textContent=tracks.length+' results';
+    document.getElementById('listHeader').hidden=tracks.length<2;
+    document.getElementById('current').textContent=selected.title||'Selected song';
+    document.getElementById('artist').textContent=selected.artist||'Riva Music';
+    tracks.filter(track=>track!==selected).forEach(track=>{
+      const row=document.createElement('div');row.className='track';row.setAttribute('role','listitem');
+      const meta=document.createElement('div');meta.className='meta';
+      const title=document.createElement('div');title.className='title trackTitle';title.textContent=track.title||'Untitled track';
+      const artist=document.createElement('div');artist.className='sub trackArtist';artist.textContent=track.artist||'YouTube Music';meta.append(title,artist);
+      const button=document.createElement('button');button.className='playSmall';button.type='button';button.textContent='Play';button.setAttribute('aria-label','Play '+(track.title||'track'));
+      button.addEventListener('click',()=>{selected=track;audio.removeAttribute('src');audio.load();play(track)});row.append(meta,button);root.append(row);
+    });
+    requestAnimationFrame(()=>window.openai?.notifyIntrinsicHeight?.({height:document.documentElement.scrollHeight}));
+    void play(selected);
+  };
   audio.addEventListener('playing',()=>{status.textContent='Playing';playButton.hidden=true});
   audio.addEventListener('pause',()=>{if(!audio.ended&&audio.currentTime>0){status.textContent='Paused';playButton.textContent='Resume';playButton.disabled=false;playButton.hidden=false}});
   playButton.addEventListener('click',()=>play());
-  requestAnimationFrame(()=>window.openai?.notifyIntrinsicHeight?.({height:document.documentElement.scrollHeight}));
-  void play();
+  window.addEventListener('openai:set_globals',event=>{
+    const fromEvent=event.detail&&event.detail.globals&&event.detail.globals.toolOutput;
+    renderResults(fromEvent||(window.openai&&window.openai.toolOutput));
+  });
+  renderResults(window.openai&&window.openai.toolOutput);
+  setTimeout(()=>{if(!initialized)status.textContent='Waiting for song results from ChatGPT…'},0);
 })();
 </script></body></html>`;
 
