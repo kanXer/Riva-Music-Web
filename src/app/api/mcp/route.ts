@@ -7,7 +7,7 @@ export const dynamic = 'force-dynamic';
 
 export async function POST(request: Request) {
   const baseUrl = (process.env.RIVA_MUSIC_URL || new URL(request.url).origin).replace(/\/$/, '');
-  const playerResourceUri = 'ui://riva-music/player/v2.html';
+  const playerResourceUri = 'ui://riva-music/player/v3.html';
   const api = async (path: string, params: Record<string, string | number | undefined> = {}) => {
     const url = new URL(`${baseUrl}/api/${path}`);
     for (const [key, value] of Object.entries(params)) if (value !== undefined && value !== '') url.searchParams.set(key, String(value));
@@ -27,29 +27,34 @@ export async function POST(request: Request) {
   .eyebrow{color:#b7ed5e;font-size:11px;font-weight:750;letter-spacing:.12em;text-transform:uppercase}
   .heading{display:flex;align-items:baseline;justify-content:space-between;gap:8px;flex-wrap:wrap}h2{font-size:clamp(17px,4vw,20px);line-height:1.25;margin:4px 0 14px}.count{color:#a7ab9f;font-size:12px}
   .now{font-size:15px;font-weight:700;overflow-wrap:anywhere}.artist{color:#b2b5ac;margin-top:3px;overflow-wrap:anywhere}
-  audio{display:block;width:100%;max-width:100%;min-width:0;height:42px;margin-top:14px;accent-color:#b7ed5e}.list{display:grid;gap:8px;margin-top:14px;max-height:min(42vh,360px);overflow-y:auto;overscroll-behavior:contain;padding:1px}
+  audio{display:block;width:100%;max-width:100%;min-width:0;height:42px;margin-top:14px;accent-color:#b7ed5e}
   .track{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:10px;min-width:0;padding:10px 11px;border:1px solid #30342b;border-radius:12px;background:#171a15}
   .meta{min-width:0}.title{font-weight:650;overflow-wrap:anywhere;word-break:break-word}.sub{color:#b0b4aa;font-size:12px;margin-top:3px;overflow-wrap:anywhere;word-break:break-word}
   button{min-height:44px;min-width:72px;display:inline-flex;align-items:center;justify-content:center;gap:6px;border:0;border-radius:999px;background:#b7ed5e;color:#18200e;font:700 13px system-ui,-apple-system,sans-serif;padding:9px 13px;cursor:pointer;touch-action:manipulation}
   button:hover{background:#c9f77a}button:focus-visible{outline:3px solid #f4f5f2;outline-offset:2px}.play{flex:none}
   .status{min-height:20px;margin-top:8px;color:#c9f77a;font-size:13px;overflow-wrap:anywhere}.empty{padding:10px 2px;color:#b0b4aa}
-  @media(max-width:420px){.player{border-radius:14px}.track{gap:8px;padding:9px}.play{min-width:64px;padding-inline:10px}.list{max-height:38vh}}
+  .playBest{width:100%;margin-top:14px;font-size:15px}.playBest[hidden]{display:none}
+  @media(max-width:420px){.player{border-radius:14px}}
   @media(prefers-reduced-motion:no-preference){button{transition:background-color .15s ease,transform .15s ease}button:active{transform:scale(.97)}}
 </style></head>
-<body><main class="player" aria-label="Riva Music player"><div class="eyebrow">Riva Music</div><div class="heading"><h2>Listen in ChatGPT</h2><span id="count" class="count"></span></div><div id="current" class="now">Choose a track</div><div id="artist" class="artist">Audio plays here in the chat.</div><audio id="audio" controls preload="none" aria-label="Audio playback controls"></audio><div id="status" class="status" aria-live="polite"></div><div id="tracks" class="list" aria-label="Playable tracks"></div></main>
+<body><main class="player" aria-label="Riva Music player"><div class="eyebrow">Riva Music</div><div class="heading"><h2>Listen in ChatGPT</h2><span id="count" class="count"></span></div><div id="current" class="now">Finding the best match…</div><div id="artist" class="artist">Audio plays here in the chat.</div><button id="playBest" class="playBest" type="button" hidden>Play best match</button><audio id="audio" controls preload="none" aria-label="Audio playback controls"></audio><div id="status" class="status" aria-live="polite"></div><div id="tracks" class="empty"></div></main>
 <script>
 (() => {
   const base=${escapedBaseUrl};
   const root=document.getElementById('tracks'), audio=document.getElementById('audio');
-  const status=document.getElementById('status'); let tracks=[];
+  const status=document.getElementById('status'), playButton=document.getElementById('playBest'); let tracks=[];
   const output=window.openai&&window.openai.toolOutput;
   tracks=output&&(output.tracks||output.results)||[];
-  if(!tracks.length){const empty=document.createElement('div');empty.className='empty';empty.textContent='No playable tracks were returned. Ask Riva Music to search for a song.';root.append(empty);return}
-  document.getElementById('count').textContent=tracks.length+' tracks';
-  const play=async (track) => {
+  const selected=tracks[0];
+  if(!selected){document.getElementById('current').textContent='No matching song found';root.textContent='Try another song or artist.';return}
+  document.getElementById('count').textContent='Best match';
+  document.getElementById('current').textContent=selected.title||'Selected song';
+  document.getElementById('artist').textContent=selected.artist||'Riva Music';
+  const play=async () => {
+    if(audio.src){try{await audio.play();status.textContent='';return}catch(error){status.textContent=error instanceof Error?error.message:'Playback could not start';playButton.hidden=false;return}}
+    playButton.disabled=true;playButton.textContent='Loading song…';
+    const track=selected;
     const id=track.videoId||track.id;
-    document.getElementById('current').textContent=track.title||'Playing';
-    document.getElementById('artist').textContent=track.artist||'Riva Music';
     status.textContent='Preparing audio…';
     try {
       const params=new URLSearchParams({title:track.title||'',artist:track.artist||''});
@@ -58,17 +63,19 @@ export async function POST(request: Request) {
       if(!response.ok||!stream.url) throw new Error(stream.error||'Could not resolve this track');
       const proxy=new URL(base+'/api/audio-proxy'); proxy.searchParams.set('url',stream.url);
       if(stream.userAgent) proxy.searchParams.set('ua',stream.userAgent);
-      audio.src=proxy.toString(); await audio.play(); status.textContent='';
-    } catch(error) { status.textContent=error instanceof Error?error.message:'Playback failed'; }
+      audio.src=proxy.toString(); await audio.play(); status.textContent='';playButton.hidden=true;
+      const openai=window.openai;
+      if(openai&&typeof openai.requestDisplayMode==='function') await openai.requestDisplayMode({mode:'pip'}).catch(()=>{});
+    } catch(error) {
+      const blocked=error instanceof DOMException&&error.name==='NotAllowedError';
+      status.textContent=blocked?'Autoplay is blocked by the browser. Tap Play best match once.':error instanceof Error?error.message:'Playback failed';
+      playButton.textContent='Play best match';playButton.disabled=false;playButton.hidden=false;
+    }
   };
-  tracks.slice(0,20).forEach(track=>{
-    const row=document.createElement('div'); row.className='track';
-    const meta=document.createElement('div'); meta.className='meta';
-    const title=document.createElement('div'); title.className='title'; title.textContent=track.title||'Untitled track';
-    const artist=document.createElement('div'); artist.className='sub'; artist.textContent=track.artist||'YouTube Music'; meta.append(title,artist);
-    const button=document.createElement('button'); button.className='play'; button.type='button'; button.textContent='▶ Play'; button.setAttribute('aria-label','Play '+(track.title||'track'));
-    button.addEventListener('click',()=>play(track)); row.append(meta,button); root.append(row);
-  });
+  audio.addEventListener('playing',()=>{status.textContent='Playing';playButton.hidden=true});
+  audio.addEventListener('pause',()=>{if(!audio.ended&&audio.currentTime>0){status.textContent='Paused';playButton.textContent='Resume';playButton.disabled=false;playButton.hidden=false}});
+  playButton.addEventListener('click',()=>play());
+  void play();
 })();
 </script></body></html>`;
 
@@ -99,7 +106,7 @@ export async function POST(request: Request) {
 
   server.registerTool('play_music', {
     title: 'Play music in ChatGPT',
-    description: 'Search for music and show playable tracks with an embedded player in ChatGPT. Use this when the user asks to play or listen to music. The user starts playback by pressing Play in the widget.',
+    description: 'When the user asks to play/listen to a song, search and automatically select the top best match, then attempt playback immediately. Do not ask the user to choose among results. If the browser blocks autoplay, the widget shows one Play best match button. After playback starts, request picture-in-picture so audio can stay available while chatting.',
     inputSchema: { query: z.string().min(1), country: z.string().optional() },
     _meta: { ui: { resourceUri: playerResourceUri }, 'openai/outputTemplate': playerResourceUri }
   }, async ({ query, country }) => {
@@ -107,8 +114,8 @@ export async function POST(request: Request) {
       const data = await api('search', { q: query, filter: 'songs', gl: country });
       const tracks = (data.results || []).filter((track: { videoId?: string; id?: string }) => track.videoId || track.id).slice(0, 20);
       return {
-        structuredContent: { tracks },
-        content: [{ type: 'text', text: tracks.length ? `Found ${tracks.length} playable tracks for “${query}”. Use the embedded player to start playback.` : `No playable tracks found for “${query}”.` }]
+        structuredContent: { tracks, selectedTrackId: tracks[0]?.videoId || tracks[0]?.id || null },
+        content: [{ type: 'text', text: tracks.length ? `Selected the top matching song for “${query}” and started playback in the player. Do not ask the user to choose a result.` : `No playable tracks found for “${query}”.` }]
       };
     } catch (error) {
       return { isError: true, content: [{ type: 'text', text: error instanceof Error ? error.message : String(error) }] };
