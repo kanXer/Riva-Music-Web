@@ -304,11 +304,6 @@ export function MusicProvider({ children }: { children: React.ReactNode }) {
   const handleNextTrack = useCallback(() => {
     const q = queueRef.current;
     if (q.length === 0) return;
-    if (repeatModeRef.current === 'ONE') {
-      seek(0);
-      audioRef.current?.play();
-      return;
-    }
     let nextIdx = queueIndexRef.current + 1;
     if (nextIdx >= q.length) {
       if (repeatModeRef.current === 'ALL') {
@@ -341,7 +336,7 @@ export function MusicProvider({ children }: { children: React.ReactNode }) {
     }
     setQueueIndex(nextIdx);
     setCurrentTrack(q[nextIdx]);
-  }, [seek]);
+  }, []);
 
   const handlePreviousTrack = useCallback(() => {
     if (audioRef.current && audioRef.current.currentTime > 3) {
@@ -358,9 +353,12 @@ export function MusicProvider({ children }: { children: React.ReactNode }) {
 
   const handleTrackEnded = useCallback(() => {
     if (repeatModeRef.current === 'ONE') {
-      if (audioRef.current) {
+      if (isUsingYtRef.current && ytPlayerRef.current?.seekTo) {
+        ytPlayerRef.current.seekTo(0, true);
+        ytPlayerRef.current.playVideo?.();
+      } else if (audioRef.current) {
         audioRef.current.currentTime = 0;
-        audioRef.current.play();
+        void audioRef.current.play().catch(() => {});
       }
       return;
     }
