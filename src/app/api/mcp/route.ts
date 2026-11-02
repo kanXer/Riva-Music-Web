@@ -104,14 +104,23 @@ export async function POST(request: Request) {
 })();
 </script></body></html>`;
 
-  server.registerResource('riva-music-player', playerResourceUri, {}, async () => ({
-    contents: [{
-      uri: playerResourceUri,
-      mimeType: 'text/html;profile=mcp-app',
-      text: playerWidget,
-      _meta: { ui: { prefersBorder: true, domain: baseUrl, csp: { connectDomains: [baseUrl], resourceDomains: [baseUrl] } } }
-    }]
-  }));
+  // Keep prior widget URIs readable while ChatGPT refreshes its cached tool metadata.
+  for (const [version, uri] of [
+    ['v1', 'ui://riva-music/player/v1.html'],
+    ['v2', 'ui://riva-music/player/v2.html'],
+    ['v3', 'ui://riva-music/player/v3.html'],
+    ['v4', 'ui://riva-music/player/v4.html'],
+    ['v5', playerResourceUri],
+  ]) {
+    server.registerResource(`riva-music-player-${version}`, uri, {}, async () => ({
+      contents: [{
+        uri,
+        mimeType: 'text/html;profile=mcp-app',
+        text: playerWidget,
+        _meta: { ui: { prefersBorder: true, domain: baseUrl, csp: { connectDomains: [baseUrl], resourceDomains: [baseUrl] } } }
+      }]
+    }));
+  }
   // MCP tool schemas provide the concrete argument types for each handler.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const register = (name: string, description: string, schema: Record<string, z.ZodType>, handler: (args: any) => Promise<unknown>) => {
@@ -133,6 +142,17 @@ export async function POST(request: Request) {
     title: 'Play music in ChatGPT',
     description: 'When the user asks to play/listen to a song, search and automatically select the top best match, then attempt playback immediately. Do not ask the user to choose among results. If the browser blocks autoplay, the widget shows one Play best match button. After playback starts, request picture-in-picture so audio can stay available while chatting.',
     inputSchema: { query: z.string().min(1), country: z.string().optional() },
+    outputSchema: {
+      tracks: z.array(z.object({
+        id: z.string(),
+        videoId: z.string().optional(),
+        title: z.string(),
+        artist: z.string().optional(),
+        durationSeconds: z.number().optional(),
+        thumbnailUrl: z.string().nullable().optional(),
+      }).passthrough()),
+      selectedTrackId: z.string().nullable(),
+    },
     _meta: { ui: { resourceUri: playerResourceUri }, 'openai/outputTemplate': playerResourceUri }
   }, async ({ query, country }) => {
     try {
