@@ -7,6 +7,7 @@ export const dynamic = 'force-dynamic';
 
 export async function POST(request: Request) {
   const baseUrl = (process.env.RIVA_MUSIC_URL || new URL(request.url).origin).replace(/\/$/, '');
+  const playerResourceUri = 'ui://riva-music/player/v1.html';
   const api = async (path: string, params: Record<string, string | number | undefined> = {}) => {
     const url = new URL(`${baseUrl}/api/${path}`);
     for (const [key, value] of Object.entries(params)) if (value !== undefined && value !== '') url.searchParams.set(key, String(value));
@@ -17,6 +18,63 @@ export async function POST(request: Request) {
   };
 
   const server = new McpServer({ name: 'riva-music', version: '1.0.0' });
+  const escapedBaseUrl = JSON.stringify(baseUrl).replace(/</g, '\\u003c');
+  const playerWidget = `<!doctype html>
+<html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+  *{box-sizing:border-box}body{margin:0;padding:16px;background:#10120f;color:#f4f5f2;font:14px system-ui,-apple-system,sans-serif}
+  .player{border:1px solid #30342b;border-radius:18px;padding:16px;background:linear-gradient(135deg,#1b2116,#141612)}
+  .eyebrow{color:#b7ed5e;font-size:11px;font-weight:700;letter-spacing:.12em;text-transform:uppercase}
+  h2{font-size:18px;margin:5px 0 14px}.now{font-size:14px;font-weight:650}.artist{color:#a7ab9f;margin-top:3px}
+  audio{width:100%;height:40px;margin-top:14px;accent-color:#b7ed5e}.list{display:grid;gap:8px;margin-top:14px;max-height:300px;overflow:auto}
+  .track{display:flex;align-items:center;gap:10px;padding:9px 11px;border:1px solid #30342b;border-radius:12px;background:#171a15}
+  .meta{min-width:0;flex:1}.title{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.sub{color:#a7ab9f;font-size:12px;margin-top:3px}
+  button{border:0;border-radius:999px;background:#b7ed5e;color:#18200e;font-weight:750;padding:9px 14px;cursor:pointer}.play{width:38px;height:38px;padding:0;font-size:16px;flex:none}
+  .status{min-height:18px;margin-top:10px;color:#b7ed5e;font-size:12px}.empty{color:#a7ab9f}
+</style>
+<body><main class="player"><div class="eyebrow">Riva Music</div><h2>Listen in ChatGPT</h2><div id="current" class="now">Choose a track</div><div id="artist" class="artist">Audio plays here in the chat.</div><audio id="audio" controls preload="none"></audio><div id="status" class="status"></div><div id="tracks" class="list"></div></main>
+<script>
+(() => {
+  const base=${escapedBaseUrl};
+  const root=document.getElementById('tracks'), audio=document.getElementById('audio');
+  const status=document.getElementById('status'); let tracks=[];
+  const output=window.openai&&window.openai.toolOutput;
+  tracks=output&&(output.tracks||output.results)||[];
+  if(!tracks.length){root.innerHTML='<div class="empty">No playable tracks were returned. Ask Riva Music to search for a song.</div>';return}
+  const play=async (track) => {
+    const id=track.videoId||track.id;
+    document.getElementById('current').textContent=track.title||'Playing';
+    document.getElementById('artist').textContent=track.artist||'Riva Music';
+    status.textContent='Preparing audio…';
+    try {
+      const params=new URLSearchParams({title:track.title||'',artist:track.artist||''});
+      const response=await fetch(base+'/api/stream/'+encodeURIComponent(id)+'?'+params);
+      const stream=await response.json();
+      if(!response.ok||!stream.url) throw new Error(stream.error||'Could not resolve this track');
+      const proxy=new URL(base+'/api/audio-proxy'); proxy.searchParams.set('url',stream.url);
+      if(stream.userAgent) proxy.searchParams.set('ua',stream.userAgent);
+      audio.src=proxy.toString(); await audio.play(); status.textContent='';
+    } catch(error) { status.textContent=error instanceof Error?error.message:'Playback failed'; }
+  };
+  tracks.slice(0,20).forEach(track=>{
+    const row=document.createElement('div'); row.className='track';
+    const meta=document.createElement('div'); meta.className='meta';
+    const title=document.createElement('div'); title.className='title'; title.textContent=track.title||'Untitled track';
+    const artist=document.createElement('div'); artist.className='sub'; artist.textContent=track.artist||'YouTube Music'; meta.append(title,artist);
+    const button=document.createElement('button'); button.className='play'; button.type='button'; button.textContent='▶'; button.setAttribute('aria-label','Play '+(track.title||'track'));
+    button.addEventListener('click',()=>play(track)); row.append(meta,button); root.append(row);
+  });
+})();
+</script></body></html>`;
+
+  server.registerResource('riva-music-player', playerResourceUri, {}, async () => ({
+    contents: [{
+      uri: playerResourceUri,
+      mimeType: 'text/html;profile=mcp-app',
+      text: playerWidget,
+      _meta: { ui: { prefersBorder: true, domain: baseUrl, csp: { connectDomains: [baseUrl], resourceDomains: [baseUrl] } } }
+    }]
+  }));
   // MCP tool schemas provide the concrete argument types for each handler.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const register = (name: string, description: string, schema: Record<string, z.ZodType>, handler: (args: any) => Promise<unknown>) => {
@@ -33,6 +91,24 @@ export async function POST(request: Request) {
   register('get_playlist', 'Get tracks from a YouTube playlist URL or ID.', { playlist_id_or_url: z.string().min(1) }, ({ playlist_id_or_url }) => api('playlist', { id: playlist_id_or_url }));
   register('get_collection', 'Get tracks from a YouTube Music collection or browse ID.', { browse_id: z.string().min(1), title: z.string().optional() }, ({ browse_id, title }) => api('collection', { browseId: browse_id, title }));
   register('get_radio', 'Get recommended tracks based on a YouTube video ID.', { video_id: z.string().min(1), country: z.string().optional() }, ({ video_id, country }) => api(`radio/${encodeURIComponent(video_id)}`, { gl: country }));
+
+  server.registerTool('play_music', {
+    title: 'Play music in ChatGPT',
+    description: 'Search for music and show playable tracks with an embedded player in ChatGPT. Use this when the user asks to play or listen to music. The user starts playback by pressing Play in the widget.',
+    inputSchema: { query: z.string().min(1), country: z.string().optional() },
+    _meta: { ui: { resourceUri: playerResourceUri }, 'openai/outputTemplate': playerResourceUri }
+  }, async ({ query, country }) => {
+    try {
+      const data = await api('search', { q: query, filter: 'songs', gl: country });
+      const tracks = (data.results || []).filter((track: { videoId?: string; id?: string }) => track.videoId || track.id).slice(0, 20);
+      return {
+        structuredContent: { tracks },
+        content: [{ type: 'text', text: tracks.length ? `Found ${tracks.length} playable tracks for “${query}”. Use the embedded player to start playback.` : `No playable tracks found for “${query}”.` }]
+      };
+    } catch (error) {
+      return { isError: true, content: [{ type: 'text', text: error instanceof Error ? error.message : String(error) }] };
+    }
+  });
 
   const transport = new WebStandardStreamableHTTPServerTransport({ enableJsonResponse: true });
   await server.connect(transport);
