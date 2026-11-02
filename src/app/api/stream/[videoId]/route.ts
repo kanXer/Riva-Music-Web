@@ -139,6 +139,23 @@ async function tryPlayer(
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': 'GET, OPTIONS',
+  'Access-Control-Allow-Headers': 'Content-Type, Range',
+  'Access-Control-Expose-Headers': 'Accept-Ranges, Content-Length, Content-Range, Content-Type',
+};
+
+function jsonWithCors(data: unknown, init: ResponseInit = {}) {
+  const headers = new Headers(init.headers);
+  for (const [key, value] of Object.entries(corsHeaders)) headers.set(key, value);
+  return NextResponse.json(data, { ...init, headers });
+}
+
+export function OPTIONS() {
+  return new Response(null, { status: 204, headers: corsHeaders });
+}
+
 // In-memory stream cache to avoid re-resolving repeatedly
 const streamCache = new Map<string, { data: any; expiry: number }>();
 
@@ -147,12 +164,12 @@ export async function GET(
   { params }: { params: Promise<{ videoId: string }> }
 ) {
   const { videoId } = await params;
-  if (!videoId) return NextResponse.json({ error: "Missing videoId" }, { status: 400 });
+  if (!videoId) return jsonWithCors({ error: "Missing videoId" }, { status: 400 });
 
   // 1. Check in-memory cache
   const cached = streamCache.get(videoId);
   if (cached && Date.now() < cached.expiry) {
-    return NextResponse.json(cached.data, {
+    return jsonWithCors(cached.data, {
       headers: {
         'Cache-Control': 'public, max-age=3600, s-maxage=3600, stale-while-revalidate=86400',
       }
@@ -243,20 +260,20 @@ export async function GET(
         expiry: Date.now() + 2 * 60 * 60 * 1000
       });
 
-      return NextResponse.json(streamResult, {
+      return jsonWithCors(streamResult, {
         headers: {
           'Cache-Control': 'public, max-age=3600, s-maxage=3600, stale-while-revalidate=86400',
         }
       });
     }
 
-    return NextResponse.json({
+    return jsonWithCors({
       error: "Stream resolution failed on all clients",
       playability: "NOT_FOUND"
     }, { status: 404 });
   } catch (err: any) {
     console.error("Stream resolution error:", err);
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    return jsonWithCors({ error: err.message }, { status: 500 });
   }
 }
 
