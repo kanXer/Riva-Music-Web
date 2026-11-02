@@ -7,7 +7,7 @@ export const dynamic = 'force-dynamic';
 
 export async function POST(request: Request) {
   const baseUrl = (process.env.RIVA_MUSIC_URL || new URL(request.url).origin).replace(/\/$/, '');
-  const playerResourceUri = 'ui://riva-music/player/v1.html';
+  const playerResourceUri = 'ui://riva-music/player/v2.html';
   const api = async (path: string, params: Record<string, string | number | undefined> = {}) => {
     const url = new URL(`${baseUrl}/api/${path}`);
     for (const [key, value] of Object.entries(params)) if (value !== undefined && value !== '') url.searchParams.set(key, String(value));
@@ -20,19 +20,23 @@ export async function POST(request: Request) {
   const server = new McpServer({ name: 'riva-music', version: '1.0.0' });
   const escapedBaseUrl = JSON.stringify(baseUrl).replace(/</g, '\\u003c');
   const playerWidget = `<!doctype html>
-<html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="color-scheme" content="dark"><title>Riva Music Player</title>
 <style>
-  *{box-sizing:border-box}body{margin:0;padding:16px;background:#10120f;color:#f4f5f2;font:14px system-ui,-apple-system,sans-serif}
-  .player{border:1px solid #30342b;border-radius:18px;padding:16px;background:linear-gradient(135deg,#1b2116,#141612)}
-  .eyebrow{color:#b7ed5e;font-size:11px;font-weight:700;letter-spacing:.12em;text-transform:uppercase}
-  h2{font-size:18px;margin:5px 0 14px}.now{font-size:14px;font-weight:650}.artist{color:#a7ab9f;margin-top:3px}
-  audio{width:100%;height:40px;margin-top:14px;accent-color:#b7ed5e}.list{display:grid;gap:8px;margin-top:14px;max-height:300px;overflow:auto}
-  .track{display:flex;align-items:center;gap:10px;padding:9px 11px;border:1px solid #30342b;border-radius:12px;background:#171a15}
-  .meta{min-width:0;flex:1}.title{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.sub{color:#a7ab9f;font-size:12px;margin-top:3px}
-  button{border:0;border-radius:999px;background:#b7ed5e;color:#18200e;font-weight:750;padding:9px 14px;cursor:pointer}.play{width:38px;height:38px;padding:0;font-size:16px;flex:none}
-  .status{min-height:18px;margin-top:10px;color:#b7ed5e;font-size:12px}.empty{color:#a7ab9f}
-</style>
-<body><main class="player"><div class="eyebrow">Riva Music</div><h2>Listen in ChatGPT</h2><div id="current" class="now">Choose a track</div><div id="artist" class="artist">Audio plays here in the chat.</div><audio id="audio" controls preload="none"></audio><div id="status" class="status"></div><div id="tracks" class="list"></div></main>
+  *{box-sizing:border-box}html{min-width:0}body{margin:0;min-width:0;padding:clamp(8px,2.8vw,16px);background:#10120f;color:#f4f5f2;font:14px/1.45 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+  .player{width:100%;max-width:760px;margin:0 auto;border:1px solid #30342b;border-radius:18px;padding:clamp(12px,3.2vw,18px);background:linear-gradient(135deg,#1b2116,#141612);overflow:hidden}
+  .eyebrow{color:#b7ed5e;font-size:11px;font-weight:750;letter-spacing:.12em;text-transform:uppercase}
+  .heading{display:flex;align-items:baseline;justify-content:space-between;gap:8px;flex-wrap:wrap}h2{font-size:clamp(17px,4vw,20px);line-height:1.25;margin:4px 0 14px}.count{color:#a7ab9f;font-size:12px}
+  .now{font-size:15px;font-weight:700;overflow-wrap:anywhere}.artist{color:#b2b5ac;margin-top:3px;overflow-wrap:anywhere}
+  audio{display:block;width:100%;max-width:100%;min-width:0;height:42px;margin-top:14px;accent-color:#b7ed5e}.list{display:grid;gap:8px;margin-top:14px;max-height:min(42vh,360px);overflow-y:auto;overscroll-behavior:contain;padding:1px}
+  .track{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:10px;min-width:0;padding:10px 11px;border:1px solid #30342b;border-radius:12px;background:#171a15}
+  .meta{min-width:0}.title{font-weight:650;overflow-wrap:anywhere;word-break:break-word}.sub{color:#b0b4aa;font-size:12px;margin-top:3px;overflow-wrap:anywhere;word-break:break-word}
+  button{min-height:44px;min-width:72px;display:inline-flex;align-items:center;justify-content:center;gap:6px;border:0;border-radius:999px;background:#b7ed5e;color:#18200e;font:700 13px system-ui,-apple-system,sans-serif;padding:9px 13px;cursor:pointer;touch-action:manipulation}
+  button:hover{background:#c9f77a}button:focus-visible{outline:3px solid #f4f5f2;outline-offset:2px}.play{flex:none}
+  .status{min-height:20px;margin-top:8px;color:#c9f77a;font-size:13px;overflow-wrap:anywhere}.empty{padding:10px 2px;color:#b0b4aa}
+  @media(max-width:420px){.player{border-radius:14px}.track{gap:8px;padding:9px}.play{min-width:64px;padding-inline:10px}.list{max-height:38vh}}
+  @media(prefers-reduced-motion:no-preference){button{transition:background-color .15s ease,transform .15s ease}button:active{transform:scale(.97)}}
+</style></head>
+<body><main class="player" aria-label="Riva Music player"><div class="eyebrow">Riva Music</div><div class="heading"><h2>Listen in ChatGPT</h2><span id="count" class="count"></span></div><div id="current" class="now">Choose a track</div><div id="artist" class="artist">Audio plays here in the chat.</div><audio id="audio" controls preload="none" aria-label="Audio playback controls"></audio><div id="status" class="status" aria-live="polite"></div><div id="tracks" class="list" aria-label="Playable tracks"></div></main>
 <script>
 (() => {
   const base=${escapedBaseUrl};
@@ -40,7 +44,8 @@ export async function POST(request: Request) {
   const status=document.getElementById('status'); let tracks=[];
   const output=window.openai&&window.openai.toolOutput;
   tracks=output&&(output.tracks||output.results)||[];
-  if(!tracks.length){root.innerHTML='<div class="empty">No playable tracks were returned. Ask Riva Music to search for a song.</div>';return}
+  if(!tracks.length){const empty=document.createElement('div');empty.className='empty';empty.textContent='No playable tracks were returned. Ask Riva Music to search for a song.';root.append(empty);return}
+  document.getElementById('count').textContent=tracks.length+' tracks';
   const play=async (track) => {
     const id=track.videoId||track.id;
     document.getElementById('current').textContent=track.title||'Playing';
@@ -61,7 +66,7 @@ export async function POST(request: Request) {
     const meta=document.createElement('div'); meta.className='meta';
     const title=document.createElement('div'); title.className='title'; title.textContent=track.title||'Untitled track';
     const artist=document.createElement('div'); artist.className='sub'; artist.textContent=track.artist||'YouTube Music'; meta.append(title,artist);
-    const button=document.createElement('button'); button.className='play'; button.type='button'; button.textContent='▶'; button.setAttribute('aria-label','Play '+(track.title||'track'));
+    const button=document.createElement('button'); button.className='play'; button.type='button'; button.textContent='▶ Play'; button.setAttribute('aria-label','Play '+(track.title||'track'));
     button.addEventListener('click',()=>play(track)); row.append(meta,button); root.append(row);
   });
 })();
