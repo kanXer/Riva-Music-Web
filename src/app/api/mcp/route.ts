@@ -7,7 +7,7 @@ export const dynamic = 'force-dynamic';
 
 export async function POST(request: Request) {
   const baseUrl = (process.env.RIVA_MUSIC_URL || new URL(request.url).origin).replace(/\/$/, '');
-  const playerResourceUri = 'ui://riva-music/player/v3.html';
+  const playerResourceUri = 'ui://riva-music/player/v4.html';
   const api = async (path: string, params: Record<string, string | number | undefined> = {}) => {
     const url = new URL(`${baseUrl}/api/${path}`);
     for (const [key, value] of Object.entries(params)) if (value !== undefined && value !== '') url.searchParams.set(key, String(value));
@@ -34,10 +34,14 @@ export async function POST(request: Request) {
   button:hover{background:#c9f77a}button:focus-visible{outline:3px solid #f4f5f2;outline-offset:2px}.play{flex:none}
   .status{min-height:20px;margin-top:8px;color:#c9f77a;font-size:13px;overflow-wrap:anywhere}.empty{padding:10px 2px;color:#b0b4aa}
   .playBest{width:100%;margin-top:14px;font-size:15px}.playBest[hidden]{display:none}
-  @media(max-width:420px){.player{border-radius:14px}}
+  .listHeader{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-top:14px;font-size:12px;font-weight:650}.scrollHint{color:#b0b4aa;font-weight:400}
+  .list{display:grid;gap:8px;height:min(32vh,260px);min-height:150px;margin-top:8px;padding:2px 5px 2px 1px;overflow-x:hidden;overflow-y:scroll;overscroll-behavior:contain;scrollbar-gutter:stable;scrollbar-width:thin;scrollbar-color:#b7ed5e #2a2d26}
+  .list::-webkit-scrollbar{width:8px}.list::-webkit-scrollbar-track{border-radius:8px;background:#2a2d26}.list::-webkit-scrollbar-thumb{border:2px solid #2a2d26;border-radius:8px;background:#b7ed5e}
+  .track{grid-template-columns:minmax(0,1fr) auto}.trackTitle{font-size:13px}.trackArtist{font-size:11px}.playSmall{min-width:58px;min-height:40px;padding-inline:10px}
+  @media(max-width:420px){.player{border-radius:14px}.list{height:min(34vh,220px);min-height:150px}.listHeader{font-size:11px}}
   @media(prefers-reduced-motion:no-preference){button{transition:background-color .15s ease,transform .15s ease}button:active{transform:scale(.97)}}
 </style></head>
-<body><main class="player" aria-label="Riva Music player"><div class="eyebrow">Riva Music</div><div class="heading"><h2>Listen in ChatGPT</h2><span id="count" class="count"></span></div><div id="current" class="now">Finding the best match…</div><div id="artist" class="artist">Audio plays here in the chat.</div><button id="playBest" class="playBest" type="button" hidden>Play best match</button><audio id="audio" controls preload="none" aria-label="Audio playback controls"></audio><div id="status" class="status" aria-live="polite"></div><div id="tracks" class="empty"></div></main>
+<body><main class="player" aria-label="Riva Music player"><div class="eyebrow">Riva Music</div><div class="heading"><h2>Listen in ChatGPT</h2><span id="count" class="count"></span></div><div id="current" class="now">Finding the best match…</div><div id="artist" class="artist">Audio plays here in the chat.</div><button id="playBest" class="playBest" type="button" hidden>Play best match</button><audio id="audio" controls preload="none" aria-label="Audio playback controls"></audio><div id="status" class="status" aria-live="polite"></div><div id="listHeader" class="listHeader" hidden><span>Other matches</span><span class="scrollHint">Scroll for more ↓</span></div><div id="tracks" class="list" role="list" aria-label="Other matching songs"></div></main>
 <script>
 (() => {
   const base=${escapedBaseUrl};
@@ -45,16 +49,19 @@ export async function POST(request: Request) {
   const status=document.getElementById('status'), playButton=document.getElementById('playBest'); let tracks=[];
   const output=window.openai&&window.openai.toolOutput;
   tracks=output&&(output.tracks||output.results)||[];
-  const selected=tracks[0];
+  let selected=tracks[0];
   if(!selected){document.getElementById('current').textContent='No matching song found';root.textContent='Try another song or artist.';return}
-  document.getElementById('count').textContent='Best match';
+  document.getElementById('count').textContent=tracks.length+' results';
+  document.getElementById('listHeader').hidden=tracks.length<2;
   document.getElementById('current').textContent=selected.title||'Selected song';
   document.getElementById('artist').textContent=selected.artist||'Riva Music';
-  const play=async () => {
+  const play=async (track=selected) => {
     if(audio.src){try{await audio.play();status.textContent='';return}catch(error){status.textContent=error instanceof Error?error.message:'Playback could not start';playButton.hidden=false;return}}
     playButton.disabled=true;playButton.textContent='Loading song…';
-    const track=selected;
+    selected=track;
     const id=track.videoId||track.id;
+    document.getElementById('current').textContent=track.title||'Selected song';
+    document.getElementById('artist').textContent=track.artist||'Riva Music';
     status.textContent='Preparing audio…';
     try {
       const params=new URLSearchParams({title:track.title||'',artist:track.artist||''});
@@ -72,9 +79,18 @@ export async function POST(request: Request) {
       playButton.textContent='Play best match';playButton.disabled=false;playButton.hidden=false;
     }
   };
+  tracks.slice(1).forEach(track=>{
+    const row=document.createElement('div');row.className='track';row.setAttribute('role','listitem');
+    const meta=document.createElement('div');meta.className='meta';
+    const title=document.createElement('div');title.className='title trackTitle';title.textContent=track.title||'Untitled track';
+    const artist=document.createElement('div');artist.className='sub trackArtist';artist.textContent=track.artist||'YouTube Music';meta.append(title,artist);
+    const button=document.createElement('button');button.className='playSmall';button.type='button';button.textContent='Play';button.setAttribute('aria-label','Play '+(track.title||'track'));
+    button.addEventListener('click',()=>{selected=track;audio.removeAttribute('src');audio.load();play(track)});row.append(meta,button);root.append(row);
+  });
   audio.addEventListener('playing',()=>{status.textContent='Playing';playButton.hidden=true});
   audio.addEventListener('pause',()=>{if(!audio.ended&&audio.currentTime>0){status.textContent='Paused';playButton.textContent='Resume';playButton.disabled=false;playButton.hidden=false}});
   playButton.addEventListener('click',()=>play());
+  requestAnimationFrame(()=>window.openai?.notifyIntrinsicHeight?.({height:document.documentElement.scrollHeight}));
   void play();
 })();
 </script></body></html>`;
