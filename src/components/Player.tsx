@@ -184,23 +184,19 @@ export function Player() {
   const lyricRefs = useRef<(HTMLParagraphElement | null)[]>([]);
   const lyricsContainerRef = useRef<HTMLDivElement | null>(null);
 
-  // Auto-scroll: keep the active line vertically centered on the Y-axis
+  // Auto-scroll: keep the active line vertically centered in the lyrics container
   useEffect(() => {
     if (activeTab !== 'lyrics') return;
-    if (activeLyricIndex >= 0) {
-      const activeEl = lyricRefs.current[activeLyricIndex];
-      const containerEl = lyricsContainerRef.current;
-      if (activeEl && containerEl) {
-        // Calculate offset so the active element is exactly centered vertically inside the container
-        const targetScrollTop =
-          activeEl.offsetTop - (containerEl.clientHeight / 2) + (activeEl.clientHeight / 2);
-        containerEl.scrollTo({
-          top: Math.max(0, targetScrollTop),
-          behavior: 'smooth'
-        });
-      } else if (activeEl) {
-        activeEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      }
+    if (activeLyricIndex < 0) return;
+    const activeEl = lyricRefs.current[activeLyricIndex];
+    const container = lyricsContainerRef.current;
+    if (activeEl && container) {
+      const targetScrollTop =
+        activeEl.offsetTop - (container.clientHeight / 2) + (activeEl.clientHeight / 2);
+      container.scrollTo({
+        top: Math.max(0, targetScrollTop),
+        behavior: 'smooth'
+      });
     }
   }, [activeLyricIndex, activeTab]);
 
@@ -481,12 +477,10 @@ export function Player() {
 
       <div
         ref={lyricsContainerRef}
-        className="flex-1 overflow-y-auto flex flex-col gap-1.5 text-center py-20 lyric-scroll scroll-smooth"
+        className="flex-1 overflow-y-auto flex flex-col gap-1.5 text-center py-[45vh] lyric-scroll scroll-smooth"
         style={{
-          scrollPaddingTop: '50%',
-          scrollPaddingBottom: '50%',
-          maskImage: 'linear-gradient(to bottom, transparent 0%, black 18%, black 82%, transparent 100%)',
-          WebkitMaskImage: 'linear-gradient(to bottom, transparent 0%, black 18%, black 82%, transparent 100%)',
+          maskImage: 'linear-gradient(to bottom, transparent 0%, black 20%, black 80%, transparent 100%)',
+          WebkitMaskImage: 'linear-gradient(to bottom, transparent 0%, black 20%, black 80%, transparent 100%)',
         }}
       >
         {isLoadingLyrics ? (
@@ -513,7 +507,7 @@ export function Player() {
                 onClick={() => seek(Math.max(0, (line.startMs - lyricOffsetMs) / 1000))}
                 className={`py-2 px-3 rounded-2xl cursor-pointer transition-all duration-300 leading-relaxed ${
                   isActive
-                    ? 'text-lg sm:text-xl md:text-2xl font-black text-[var(--color-lime)] scale-[1.06] bg-[var(--color-lime)]/15 border border-[var(--color-lime)]/40 shadow-lg shadow-[var(--color-lime)]/10 my-1'
+                    ? 'text-lg sm:text-xl md:text-2xl font-black text-[var(--color-lime)] scale-[1.06] bg-[var(--color-lime)]/15 border border-[var(--color-lime)]/40 shadow-lg shadow-[var(--color-lime)]/10'
                     : isPast
                       ? 'text-sm sm:text-base font-semibold text-[var(--color-text-faint)] opacity-40 hover:opacity-75'
                       : 'text-sm sm:text-base font-semibold text-[var(--color-text-secondary)] opacity-70 hover:opacity-100'

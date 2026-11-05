@@ -7,7 +7,7 @@ export const dynamic = 'force-dynamic';
 
 export async function POST(request: Request) {
   const baseUrl = (process.env.RIVA_MUSIC_URL || new URL(request.url).origin).replace(/\/$/, '');
-  const playerResourceUri = 'ui://riva-music/player/v5.html';
+  const playerResourceUri = 'ui://riva-music/player/v7.html';
   const api = async (path: string, params: Record<string, string | number | undefined> = {}) => {
     const url = new URL(`${baseUrl}/api/${path}`);
     for (const [key, value] of Object.entries(params)) if (value !== undefined && value !== '') url.searchParams.set(key, String(value));
@@ -46,7 +46,7 @@ export async function POST(request: Request) {
 (() => {
   const base=${escapedBaseUrl};
   const root=document.getElementById('tracks'), audio=document.getElementById('audio');
-  const status=document.getElementById('status'), playButton=document.getElementById('playBest'); let tracks=[],selected=null,initialized=false;
+  const status=document.getElementById('status'), playButton=document.getElementById('playBest'); let tracks=[],selected=null,selectedIndex=0,initialized=false,repeatMode='OFF';
   const play=async (track=selected) => {
     if(!track)return;
     if(audio.src){try{await audio.play();status.textContent='';return}catch(error){status.textContent=error instanceof Error?error.message:'Playback could not start';playButton.hidden=false;return}}
@@ -72,12 +72,41 @@ export async function POST(request: Request) {
       playButton.textContent='Play best match';playButton.disabled=false;playButton.hidden=false;
     }
   };
+  const playAt=async index=>{if(!tracks.length)return;selectedIndex=(index+tracks.length)%tracks.length;selected=tracks[selectedIndex];audio.removeAttribute('src');audio.load();await play(selected)};
+  const applyAction=message=>{
+    const {action,mode}=message||{};
+    if(action==='stop'){audio.pause();audio.removeAttribute('src');audio.load();status.textContent='Stopped';selected=null;initialized=true}
+    else if(action==='pause')audio.pause();
+    else if(action==='resume')void play(selected);
+    else if(action==='next')void playAt(selectedIndex+1);
+    else if(action==='previous')void playAt(selectedIndex-1);
+    else if(action==='repeat'){repeatMode=mode||'ALL';status.textContent='Repeat '+repeatMode.toLowerCase()}
+  };
+  const channel=typeof BroadcastChannel!=='undefined'?new BroadcastChannel('riva-music-player-v1'):null;
+  if(channel)channel.addEventListener('message',event=>applyAction(event.data));
+  const receiveStorageAction=event=>{if(event.key==='riva-music-player-command'&&event.newValue){try{applyAction(JSON.parse(event.newValue))}catch{}}};
+  window.addEventListener('storage',receiveStorageAction);
+  const publishAction=message=>{
+    if(channel)channel.postMessage(message);
+    try{localStorage.setItem('riva-music-player-command',JSON.stringify({...message,nonce:Date.now()+Math.random()}))}catch{}
+    applyAction(message);
+  };
   const renderResults=output=>{
-    if(initialized||!output)return;
+    if(!output)return;
+    const action=output.action;
+    if(action){
+      publishAction(output);return;
+    }
+    initialized=false;
     const results=output.tracks||output.results||[];
     if(!Array.isArray(results)||results.length===0)return;
-    tracks=results;selected=tracks.find(track=>(track.videoId||track.id)===output.selectedTrackId)||tracks[0];initialized=true;
-    document.getElementById('count').textContent=tracks.length+' results';
+    if(channel)channel.postMessage({action:'stop'});
+    try{localStorage.setItem('riva-music-player-command',JSON.stringify({action:'stop',nonce:Date.now()+Math.random()}))}catch{}
+    audio.pause();audio.removeAttribute('src');audio.load();
+    root.replaceChildren();
+    tracks=results;selectedIndex=Math.max(0,tracks.findIndex(track=>(track.videoId||track.id)===output.selectedTrackId));selected=tracks[selectedIndex]||tracks[0];initialized=true;
+    document.getElementById('count').textContent=tracks.length+(output.playlistTitle?' songs':' results');
+    if(output.playlistTitle)document.querySelector('h2').textContent=output.playlistTitle;
     document.getElementById('listHeader').hidden=tracks.length<2;
     document.getElementById('current').textContent=selected.title||'Selected song';
     document.getElementById('artist').textContent=selected.artist||'Riva Music';
@@ -87,12 +116,13 @@ export async function POST(request: Request) {
       const title=document.createElement('div');title.className='title trackTitle';title.textContent=track.title||'Untitled track';
       const artist=document.createElement('div');artist.className='sub trackArtist';artist.textContent=track.artist||'YouTube Music';meta.append(title,artist);
       const button=document.createElement('button');button.className='playSmall';button.type='button';button.textContent='Play';button.setAttribute('aria-label','Play '+(track.title||'track'));
-      button.addEventListener('click',()=>{selected=track;audio.removeAttribute('src');audio.load();play(track)});row.append(meta,button);root.append(row);
+      button.addEventListener('click',()=>{selected=track;selectedIndex=tracks.indexOf(track);audio.removeAttribute('src');audio.load();play(track)});row.append(meta,button);root.append(row);
     });
     requestAnimationFrame(()=>window.openai?.notifyIntrinsicHeight?.({height:document.documentElement.scrollHeight}));
     void play(selected);
   };
   audio.addEventListener('playing',()=>{status.textContent='Playing';playButton.hidden=true});
+  audio.addEventListener('ended',()=>{if(repeatMode==='ONE'){audio.currentTime=0;void audio.play().catch(()=>{});return}if(selectedIndex<tracks.length-1||repeatMode==='ALL')void playAt(selectedIndex+1)});
   audio.addEventListener('pause',()=>{if(!audio.ended&&audio.currentTime>0){status.textContent='Paused';playButton.textContent='Resume';playButton.disabled=false;playButton.hidden=false}});
   playButton.addEventListener('click',()=>play());
   window.addEventListener('openai:set_globals',event=>{
@@ -110,7 +140,9 @@ export async function POST(request: Request) {
     ['v2', 'ui://riva-music/player/v2.html'],
     ['v3', 'ui://riva-music/player/v3.html'],
     ['v4', 'ui://riva-music/player/v4.html'],
-    ['v5', playerResourceUri],
+    ['v5', 'ui://riva-music/player/v5.html'],
+    ['v6', 'ui://riva-music/player/v6.html'],
+    ['v7', playerResourceUri],
   ]) {
     server.registerResource(`riva-music-player-${version}`, uri, {}, async () => ({
       contents: [{
@@ -157,7 +189,7 @@ export async function POST(request: Request) {
   }, async ({ query, country }) => {
     try {
       const data = await api('search', { q: query, filter: 'songs', gl: country });
-      const tracks = (data.results || []).filter((track: { videoId?: string; id?: string }) => track.videoId || track.id).slice(0, 20);
+      const tracks = (data.results || []).filter((track: { videoId?: string; id?: string }) => track.videoId || track.id).slice(0, 20).map((track: { videoId?: string; id?: string }) => ({ ...track, id: track.id || track.videoId! }));
       return {
         structuredContent: { tracks, selectedTrackId: tracks[0]?.videoId || tracks[0]?.id || null },
         content: [{ type: 'text', text: tracks.length ? `Selected the top matching song for “${query}” and started playback in the player. Do not ask the user to choose a result.` : `No playable tracks found for “${query}”.` }]
@@ -165,6 +197,41 @@ export async function POST(request: Request) {
     } catch (error) {
       return { isError: true, content: [{ type: 'text', text: error instanceof Error ? error.message : String(error) }] };
     }
+  });
+
+  server.registerTool('control_music', {
+    title: 'Control music playback',
+    description: 'Control the currently playing Riva Music audio in the ChatGPT player. IMPORTANT: when the user says stop the music/song/audio (including Hindi/Urdu: band karo, rok do, music band), call this tool with action="stop". Do not tell the user a Stop control is unavailable. Also supports pause, resume, next, previous, and repeat (OFF, ONE, ALL).',
+    inputSchema: { action: z.enum(['pause','resume','stop','next','previous','repeat']), mode: z.enum(['OFF','ONE','ALL']).optional() },
+    outputSchema: { action: z.string(), mode: z.string().optional() },
+    _meta: { ui: { resourceUri: playerResourceUri }, 'openai/outputTemplate': playerResourceUri }
+  }, async ({ action, mode }) => ({
+    structuredContent: { action, ...(action === 'repeat' ? { mode: mode || 'ALL' } : {}) },
+    content: [{ type: 'text', text: action === 'repeat' ? `Repeat set to ${mode || 'ALL'}.` : `Music ${action}.` }]
+  }));
+
+  server.registerTool('stop_music', {
+    title: 'Stop music playback',
+    description: 'Immediately stop and clear the currently playing Riva Music audio in the ChatGPT player. ALWAYS call this tool when the user asks to stop music, stop the song, turn music off, or says band karo / rok do. Do not respond that a Stop control is unavailable.',
+    inputSchema: {},
+    outputSchema: { action: z.string() },
+    _meta: { ui: { resourceUri: playerResourceUri }, 'openai/outputTemplate': playerResourceUri }
+  }, async () => ({
+    structuredContent: { action: 'stop' },
+    content: [{ type: 'text', text: 'Playback stopped.' }]
+  }));
+
+  server.registerTool('create_music_playlist', {
+    title: 'Create a music playlist',
+    description: 'Find up to 10 playable songs matching a playlist theme or description and load them into the Riva Music player as a sequential playlist.',
+    inputSchema: { query: z.string().min(1), title: z.string().optional(), country: z.string().optional() },
+    outputSchema: { tracks: z.array(z.object({ id: z.string(), videoId: z.string().optional(), title: z.string(), artist: z.string().optional() }).passthrough()), selectedTrackId: z.string().nullable(), playlistTitle: z.string() },
+    _meta: { ui: { resourceUri: playerResourceUri }, 'openai/outputTemplate': playerResourceUri }
+  }, async ({ query, title, country }) => {
+    const data = await api('search', { q: query, filter: 'songs', gl: country });
+    const tracks = (data.results || []).filter((track: { videoId?: string; id?: string }) => track.videoId || track.id).slice(0, 10).map((track: { videoId?: string; id?: string }) => ({ ...track, id: track.id || track.videoId! }));
+    const playlistTitle = title || query;
+    return { structuredContent: { tracks, selectedTrackId: tracks[0]?.videoId || tracks[0]?.id || null, playlistTitle }, content: [{ type: 'text', text: tracks.length ? `Created “${playlistTitle}” with ${tracks.length} songs and started playback.` : `No playable songs found for “${query}”.` }] };
   });
 
   const transport = new WebStandardStreamableHTTPServerTransport({ enableJsonResponse: true });

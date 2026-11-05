@@ -37,6 +37,17 @@ expose('get_lyrics', 'Find lyrics for a track using its title, artist, and optio
 expose('get_playlist', 'Get tracks and title for a YouTube Music or YouTube playlist URL or ID.', { playlist_id_or_url: z.string().min(1) }, ({ playlist_id_or_url }) => api('playlist', { id: playlist_id_or_url }));
 expose('get_collection', 'Get tracks from a YouTube Music collection or browse ID.', { browse_id: z.string().min(1), title: z.string().optional() }, ({ browse_id, title }) => api('collection', { browseId: browse_id, title }));
 expose('get_radio', 'Get recommended tracks based on a YouTube video ID.', { video_id: z.string().min(1), country: z.string().optional() }, ({ video_id, country }) => api(`radio/${encodeURIComponent(video_id)}`, { gl: country }));
+expose('create_music_playlist', 'Find up to 10 playable songs matching a playlist theme or description. The returned tracks are ordered for sequential playback.', {
+  query: z.string().min(1), title: z.string().optional(), country: z.string().optional()
+}, async ({ query, title, country }) => {
+  const data = await api('search', { q: query, filter: 'songs', gl: country });
+  const tracks = (data.results || []).filter(track => track.videoId || track.id).slice(0, 10).map(track => ({ ...track, id: track.id || track.videoId }));
+  return { playlistTitle: title || query, tracks, selectedTrackId: tracks[0]?.videoId || tracks[0]?.id || null };
+});
+expose('control_music', 'Send a playback command for an MCP player client to apply. Supported actions: pause, resume, stop, next, previous, and repeat (OFF, ONE, ALL).', {
+  action: z.enum(['pause','resume','stop','next','previous','repeat']), mode: z.enum(['OFF','ONE','ALL']).optional()
+}, ({ action, mode }) => ({ action, ...(action === 'repeat' ? { mode: mode || 'ALL' } : {}) }));
+expose('stop_music', 'Stop the currently playing Riva Music audio. Always use this when the user asks to stop music, stop a song, or says band karo / rok do.', {}, async () => ({ action: 'stop' }));
 
 const transport = new StdioServerTransport();
 await server.connect(transport);
